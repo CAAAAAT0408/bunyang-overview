@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>분양개요 자동작성</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--line:#d9dde3;--ink:#1d2330;--sub:#5b6474;--accent:#1f5fbf;--accent2:#e8f0fc;
+  --warn:#9a5b00;--warnbg:#fff6e5;--ok:#1b7f3b;--okbg:#e9f7ee;--err:#b42318;--errbg:#fdecea;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 "Malgun Gothic","맑은 고딕",sans-serif}
+header{background:#1d2b45;color:#fff;padding:14px 24px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+header h1{font-size:19px;margin:0}
+header span{color:#c7d1e3;font-size:13px}
+main{max-width:1280px;margin:0 auto;padding:18px 16px 80px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin-bottom:16px}
+.card h2{font-size:16px;margin:0 0 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card h2 .n{background:var(--accent);color:#fff;border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+#boot{background:var(--accent2);border:1px solid #c6d7f2;color:#1d3f75;border-radius:8px;padding:10px 14px;margin-bottom:16px}
+#boot.err{background:var(--errbg);border-color:#f2c2bc;color:var(--err)}
+.drops{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.drop{border:2px dashed #aab4c3;border-radius:8px;padding:18px;text-align:center;cursor:pointer;background:#fafbfc;position:relative}
+.drop.has{border-color:var(--ok);background:var(--okbg)}
+.drop.over{border-color:var(--accent);background:var(--accent2)}
+.drop b{display:block;font-size:15px;margin-bottom:4px}
+.drop small{color:var(--sub)}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+input[type=text],input[type=number],input[type=date],textarea,select{font:inherit;border:1px solid var(--line);border-radius:5px;padding:5px 7px;background:#fff;color:var(--ink)}
+textarea{width:100%;resize:vertical}
+button,.btn{font:inherit;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;padding:7px 14px;cursor:pointer;display:inline-block}
+button.sub,.btn.sub{background:#fff;color:var(--accent)}
+button.small,.btn.small{padding:3px 8px;font-size:12px}
+button:disabled{opacity:.5;cursor:default}
+#log{background:#0f1726;color:#d8e1f0;font:12px/1.55 Consolas,"Malgun Gothic",monospace;border-radius:6px;padding:10px 12px;max-height:220px;overflow:auto;white-space:pre-wrap}
+.hidden{display:none!important}
+.grid{display:grid;grid-template-columns:150px 1fr;gap:6px 12px;align-items:center}
+.grid label{color:var(--sub);text-align:right}
+.grid input[type=text]{width:100%}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.warns{background:var(--warnbg);border:1px solid #f0d9a8;color:var(--warn);border-radius:6px;padding:8px 12px 8px 28px;margin:0 0 12px}
+.warns li{margin:2px 0}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid var(--line);padding:4px 6px;text-align:center;vertical-align:middle}
+th{background:#eef1f5;font-weight:normal;color:var(--sub);font-size:13px}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+td input[type=number]{width:90px;text-align:right}
+.scroll{overflow:auto}
+.pk{font-size:12px;color:var(--sub);margin-top:4px}
+.tag{display:inline-block;border-radius:10px;padding:0 8px;font-size:12px;background:#eef1f5;color:var(--sub)}
+.opt td.name{text-align:left;min-width:180px}
+.opt tr.off td{color:#9aa3b2;background:#fafafa}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.slot{border:1px solid var(--line);border-radius:6px;padding:8px;background:#fafbfc}
+.slot .t{font-weight:bold;font-size:13px;margin-bottom:6px;display:flex;justify-content:space-between}
+.ims{display:flex;gap:6px;flex-wrap:wrap;min-height:90px;align-items:center;justify-content:center;background:#fff;border:1px dashed var(--line);border-radius:4px;padding:4px;cursor:pointer}
+.ims img{max-width:100%;max-height:140px;display:block}
+.ims .empty{color:#9aa3b2;font-size:12px}
+.units{margin-top:14px}
+.units table td{background:#fff}
+.units .ims{min-height:70px}
+.units .ims img{max-height:90px}
+#modal{position:fixed;inset:0;background:rgba(15,23,38,.55);display:flex;align-items:flex-start;justify-content:center;z-index:50;padding:30px 12px;overflow:auto}
+#modal .box{background:#fff;border-radius:8px;max-width:1150px;width:100%;padding:14px 16px}
+#modal .head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+#modal .head b{font-size:15px;margin-right:auto}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;max-height:65vh;overflow:auto}
+.gal .it{border:2px solid transparent;border-radius:5px;padding:3px;cursor:pointer;background:#f6f7f9;text-align:center}
+.gal .it.sel{border-color:var(--accent)}
+.gal .it img{max-width:100%;max-height:130px}
+.gal .it small{display:block;font-size:11px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gal .it a{color:var(--accent);text-decoration:underline;cursor:pointer}
+#cropwrap{position:relative;display:inline-block;user-select:none;cursor:crosshair;max-width:100%}
+#cropwrap img{max-width:100%;max-height:70vh;display:block}
+#croprect{position:absolute;border:2px solid #ff3b30;background:rgba(255,59,48,.12);pointer-events:none}
+.ok{color:var(--ok)}.err{color:var(--err)}
+.hint{color:var(--sub);font-size:12px}
+footer{max-width:1280px;margin:0 auto;padding:0 16px 30px;color:var(--sub);font-size:12px}
+footer a{color:var(--accent)}
+@media (max-width:860px){.drops,.two{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.grid label{text-align:left}}
+</style>
+</head>
+<body>
+<header><h1>분양개요 자동작성</h1><span>입주자모집공고(PDF) + 분양개요 양식(xlsx) → 분양개요 및 청약결과 엑셀</span></header>
+<main>
+<div id="boot">준비 중…</div>
+
+<section class="card" id="step1">
+  <h2><span class="n">1</span>파일 넣기 <span class="hint">파일은 서버로 보내지 않고 이 브라우저 안에서만 처리합니다</span></h2>
+  <div class="drops">
+    <div class="drop" id="dropN"><b>입주자모집공고 (.pdf)</b><small>청약홈·분양 홈페이지의 공고 PDF</small><div class="fn"></div>
+      <input type="file" accept=".pdf"></div>
+    <div class="drop" id="dropT"><b>분양개요 양식 (.xlsx)</b><small>이전 현장의 "분양개요 및 청약결과" 파일</small><div class="fn"></div>
+      <input type="file" accept=".xlsx,.xlsm"></div>
+  </div>
+  <div class="row">
+    <button id="go" disabled>분석하기</button>
+    <span class="hint">공고 분석에 30초~2분 걸립니다. 공고 파일 이름을 <b>경기-오산-양산4지구(1BL)-GS-입주자모집공고.pdf</b> 처럼 붙이면 제목·저장 이름이 맞게 나옵니다.</span>
+  </div>
+</section>
+
+<section class="card hidden" id="logcard">
+  <h2>진행 기록 <span id="status" class="tag"></span></h2>
+  <div id="log"></div>
+</section>
+
+<div id="review" class="hidden">
+  <section class="card">
+    <h2><span class="n">2</span>일반개요 · 사업일정</h2>
+    <ul class="warns hidden" id="warns"></ul>
+    <div class="two">
+      <div class="grid" id="gen"></div>
+      <div class="grid" id="sch"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="n">3</span>공급개요 <span class="hint">공급금액 = 타입별 세대수가 가장 많은 층의 금액, 같으면 가장 높은 층 (기준층을 바꿀 수 있음) · 금액 단위 천원 · 유상옵션(C)는 엑셀에서 직접 입력</span></h2>
+    <div class="scroll"><table id="sup"></table></div>
+    <div class="two" style="margin-top:12px">
+      <div class="grid" id="notes"></div>
+      <div><label class="hint">비고 (유상옵션 포함/미포함 품목) <label><input type="checkbox" id="remAuto"> 자동</label></label>
+        <textarea id="remarks" rows="11"></textarea></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2><span class="n">4</span>유상옵션 <span class="hint">공고의 유상옵션 전체를 엑셀 공급개요 오른쪽(T열부터)에 타입별 한 줄로 적습니다 (단위 천원) · 체크한 품목은 비고의 "포함 품목"에 적힘 · 합계(C)는 직접 입력</span></h2>
+    <div class="scroll"><table class="opt" id="opt"></table></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="n">5</span>그림 <span class="hint">칸을 누르면 PC 의 그림을 넣거나, 공고 PDF 속 그림을 고르거나, 공고 쪽을 보며 필요한 부분을 잘라 넣을 수 있습니다. 비워 둔 칸은 양식의 그림을 그대로 둡니다.</span></h2>
+    <div class="slots" id="slots"></div>
+    <div class="units"><b>단위세대 평면도</b> <span class="hint">기본형 평면이 없으면 엑셀에 X 표</span><div class="scroll"><table id="units"></table></div></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="n">6</span>엑셀 만들기</h2>
+    <div class="row" style="margin-top:0">
+      <label>파일 이름 <input type="text" id="outname" size="60"></label>
+      <label><input type="checkbox" id="delHidden" checked> 이전 현장의 숨김 시트 지우기</label>
+      <button id="build">엑셀 만들기</button>
+      <span id="buildmsg" class="hint"></span>
+    </div>
+    <div class="hint" style="margin-top:6px">청약결과 시트는 타입 수에 맞춰 줄을 맞추고 <b>수식만</b> 넣습니다 (접수건수 등은 비워 둠). 근거 값은 숨김 시트 "공고자료"에 들어갑니다.
+      계산식 값은 내려받은 파일을 Excel 로 열면 계산됩니다.</div>
+    <div id="result" class="hidden" style="margin-top:12px">
+      <a id="dl" class="btn" href="#">엑셀 내려받기</a> <span id="resname"></span>
+    </div>
+  </section>
+</div>
+</main>
+<footer>공고·양식·그림 파일은 이 브라우저 밖으로 나가지 않습니다 (PDF 읽기·엑셀 작성 모두 브라우저 안 Python 으로 처리).
+  처음 열 때 부품을 받느라 시간이 걸리고, 그 뒤로는 브라우저에 저장돼 빨라집니다. 크롬·엣지 최신판에서 쓰세요.</footer>
+
+<div id="modal" class="hidden"><div class="box">
+  <div class="head"><b id="mtitle"></b>
+    <label class="btn sub small">PC 의 그림 넣기<input type="file" id="upimg" accept="image/*" multiple style="display:none"></label>
+    <button class="sub small" id="mpage">공고 쪽에서 잘라 쓰기</button>
+    <button class="sub small" id="mclear">비우기</button>
+    <button class="small" id="mclose">닫기</button></div>
+  <div id="mgal" class="gal"></div>
+  <div id="mcrop" class="hidden">
+    <div class="row" style="margin:0 0 8px">
+      <span id="pagenav" class="hidden"><button class="sub small" id="pprev">◀</button>
+        공고 <input type="number" id="pno" min="1" value="1" style="width:64px"> / <span id="pcount">?</span> 쪽
+        <button class="sub small" id="pnext">▶</button></span>
+      <span class="hint">그림 위에서 쓸 부분을 끌어서 고르세요.</span>
+      <button class="small" id="cropok">이 부분 쓰기</button><button class="sub small" id="cropall">그림 전체 쓰기</button>
+      <button class="sub small" id="cropback">목록으로</button></div>
+    <div id="cropwrap"><img id="cropimg"><div id="croprect" class="hidden"></div></div>
+  </div>
+</div></div>
+
+<script>
+const VERSION = '2026.10.16a';
+const $ = s => document.querySelector(s);
+const S = {draft: null, files: {}, imgs: {}, order: [], picker: null, seq: 0};
+const fmt = (v, d = 0) => (v === null || v === undefined || v === '' || isNaN(v)) ? '' :
+  Number(v).toLocaleString('ko-KR', {minimumFractionDigits: d, maximumFractionDigits: d});
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+
+// ---------------------------------------------------------------- 브라우저 안 Python
+const worker = new Worker('worker.js?v=' + VERSION, {type: 'module'});
+let rseq = 0, isReady = false;
+const pending = {};
+worker.onmessage = e => {
+  const d = e.data;
+  if (d.status !== undefined) { if (d.status) { $('#boot').textContent = d.status; $('#boot').classList.remove('hidden'); } return; }
+  if (d.log !== undefined) { addLog(d.log); return; }
+  if (d.ready) { isReady = true; $('#boot').classList.add('hidden'); updateGo(); return; }
+  if (d.fatal) { $('#boot').textContent = '준비 실패: ' + d.fatal + ' — 새로고침해 보세요. (인터넷 연결 필요)'; $('#boot').classList.add('err'); return; }
+  if (pending[d.id]) { pending[d.id](d.result); delete pending[d.id]; }
+};
+function rpc(cmd, args, transfer) {
+  return new Promise(res => { const id = ++rseq; pending[id] = res; worker.postMessage({id, cmd, args}, transfer || []); });
+}
+function addLog(msg) {
+  const t = new Date().toTimeString().slice(0, 8);
+  $('#log').textContent += (($('#log').textContent ? '\n' : '') + t + ' ' + msg); $('#log').scrollTop = 1e9;
+}
+
+// ---------------------------------------------------------------- 1. 파일
+function updateGo() { $('#go').disabled = !(isReady && S.files.notice && S.files.template); }
+function setupDrop(id, key, exts) {
+  const el = $(id), inp = el.querySelector('input');
+  const take = f => {
+    if (!f) return;
+    if (!exts.some(x => f.name.toLowerCase().endsWith(x))) { alert(exts.join(', ') + ' 파일을 넣어 주세요.'); return; }
+    S.files[key] = f; el.classList.add('has'); el.querySelector('.fn').textContent = f.name; updateGo();
+  };
+  inp.addEventListener('change', () => take(inp.files[0]));
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('over'));
+  el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('over'); take(e.dataTransfer.files[0]); });
+}
+setupDrop('#dropN', 'notice', ['.pdf']);
+setupDrop('#dropT', 'template', ['.xlsx', '.xlsm']);
+
+$('#go').onclick = async () => {
+  $('#go').disabled = true;
+  $('#review').classList.add('hidden'); $('#logcard').classList.remove('hidden'); $('#log').textContent = '';
+  $('#status').textContent = '분석 중'; $('#result').classList.add('hidden');
+  const notice = new Uint8Array(await S.files.notice.arrayBuffer());
+  const template = new Uint8Array(await S.files.template.arrayBuffer());
+  const r = await rpc('analyze', {notice, nname: S.files.notice.name, template, tname: S.files.template.name});
+  $('#go').disabled = false;
+  if (!r.ok) { $('#status').textContent = '오류'; addLog('✖ ' + r.error); return; }
+  $('#status').textContent = '확인 대기';
+  S.draft = r.draft; S.imgs = {}; S.order = []; S.pages = null;
+  renderAll(); $('#review').classList.remove('hidden');
+  const p = await rpc('pdf_images', {});
+  if (p.ok) {
+    for (const m of p.list) addImage(new Blob([m.data], {type: m.ext === 'png' ? 'image/png' : 'image/jpeg'}), m.w, m.h, `공고 ${m.page}쪽`, 'pdf');
+    if (p.list.length) addLog(`공고 PDF 속 그림 ${p.list.length}장을 그림 후보에 넣었습니다.`);
+  }
+};
+
+// ---------------------------------------------------------------- 계산 (엔진 finalize 와 같게)
+function trunc2(x) { return (Math.floor(x * 100) / 100).toFixed(2); }
+function optAmount(g, a) {
+  const vid = (g.choice || {})[a]; const v = (g.variants || []).find(v => v.id === vid);
+  return v ? (v.prices[a] || 0) : 0;
+}
+function recompute() {
+  const d = S.draft;
+  let tp = 0, tpy = 0, hh = 0;
+  for (const t of d.types) {
+    if (t.tiers && t.tiers.length && t.base !== null && t.base !== undefined && !t.price_manual) t.price = t.tiers[t.base].total;
+    t.options = {}; let s = 0;
+    for (const g of d.options || []) if (g.include) { const v = optAmount(g, t.abbr); t.options[g.id] = v; s += v; }
+    t.option_total = s;
+    hh += Number(t.units || 0);
+    for (const x of t.tiers || []) { tp += x.total * x.units; tpy += (t.supply || 0) * 0.3025 * x.units; }
+  }
+  d.households = hh;
+  d.avg = tpy ? tp / tpy : null;
+  d.avg_note = d.avg ? `※ 평균평당가 : ${fmt(Math.floor(d.avg / 1000))}천원/평` : '※ 평균평당가 : ';
+  if (d.basis_note_auto !== false) {
+    const labs = d.types.filter(t => (t.tiers || []).length >= 2 && t.base !== null && t.base !== undefined).map(t => t.tiers[t.base].floor.replace(/\s+/g, ''));
+    if (labs.length) {
+      const cnt = {}; labs.forEach(l => cnt[l] = (cnt[l] || 0) + 1);
+      const common = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0];
+      d.basis_note = cnt[common] === labs.length ? ` ※ 층별공급금액 세분화, ${common} 분양가` : ` ※ 층별공급금액 세분화, 타입별 최다세대 층(${common} 등) 분양가`;
+    }
+  }
+  if (d.remarks_auto !== false) {
+    const inc = (d.options || []).filter(g => g.include), exc = (d.options || []).filter(g => !g.include);
+    const names = gs => [...new Set(gs.map(g => g.label || g.name))];
+    d.remarks = ' [유상옵션 금액 포함 품목]\n' + names(inc).map(n => `  - ${n}\n`).join('') +
+      (exc.length ? '\n [유상옵션 금액 미포함 품목]\n' + names(exc).map(n => `  - ${n}\n`).join('') : '');
+  }
+  if (d.parking_text_auto !== false) {
+    const pk = Number(d.parking || 0), heat = d.heating || '';
+    d.parking_text = (pk && hh) ? `총 ${fmt(pk)}대(세대당 ${trunc2(pk / hh)}대) / ${heat}` : `총 대(세대당 대) / ${heat}`;
+  }
+}
+
+// ---------------------------------------------------------------- 2~4. 값 화면
+function field(label, key, opt = {}) {
+  const v = S.draft[key] ?? '';
+  const type = opt.type || 'text';
+  return `<label>${label}</label><div>${type === 'area'
+    ? `<textarea data-k="${key}" rows="${opt.rows || 2}">${esc(v)}</textarea>`
+    : `<input type="${type}" data-k="${key}" value="${esc(v)}" ${opt.ro ? 'readonly' : ''} placeholder="${esc(opt.ph || '')}">`}${opt.after || ''}</div>`;
+}
+function renderAll() {
+  recompute();
+  const d = S.draft;
+  const w = (d.warnings || []);
+  $('#warns').innerHTML = w.map(x => `<li>${esc(x)}</li>`).join('');
+  $('#warns').classList.toggle('hidden', !w.length);
+  const pkhint = '<div class="pk">주차대수는 직접 입력합니다 (세대당 대수는 자동 계산).</div>';
+  $('#gen').innerHTML = field('제목', 'title') + field('작성일', 'written') + field('공급위치', 'location') +
+    field('단지규모', 'scale') + field('단지특징', 'features', {after: '<div class="hint">공고에 없는 항목입니다. 입지 특징을 적어 주세요.</div>'}) +
+    `<label>주차대수</label><div><input type="number" data-k="parking" value="${d.parking ?? ''}" style="width:110px"> 대 ·
+       난방 <input type="text" data-k="heating" value="${esc(d.heating)}" style="width:90px">${pkhint}</div>` +
+    field('주차대수/난방방식', 'parking_text') + field('위탁/수탁/시공', 'developers') + field('견본주택', 'model_house');
+  $('#sch').innerHTML = field('M/H 오픈일', 'mh_open', {type: 'date'}) + field('모집공고', 'notice_date', {type: 'date'}) +
+    field('청약일정', 'subscription') + field('당첨자발표', 'winners', {type: 'date'}) + field('계약일정', 'contract') +
+    field('입주예정', 'move_in') + field('홈페이지', 'homepage', {ph: '분양 홈페이지 주소 (엑셀 인쇄영역 밖 칸)'}) +
+    `<label></label><div class="hint">M/H 오픈일이 공고에 없으면 비어 있습니다. 직접 넣어 주세요.</div>`;
+  $('#notes').innerHTML = field('구분 칸', 'label', {type: 'area', rows: 4}) + field('소계 줄 문구', 'basis_note') +
+    field('평균평당가', 'avg_note', {ro: true}) + field('납부조건', 'payment_note') +
+    field('유상옵션 기준', 'option_note', {ph: '비워 두면 양식 문구 그대로'});
+  $('#remarks').value = d.remarks || ''; $('#remAuto').checked = d.remarks_auto !== false;
+  $('#outname').value = d.output_name || ''; $('#delHidden').checked = d.delete_hidden !== false;
+  renderSupply(); renderOptions(); renderImages();
+  bindFields();
+}
+function bindFields() {
+  document.querySelectorAll('[data-k]').forEach(el => {
+    el.oninput = () => {
+      const k = el.dataset.k; let v = el.value;
+      if (k === 'parking') v = v ? Number(v) : null;
+      S.draft[k] = v;
+      if (k === 'parking_text') S.draft.parking_text_auto = false;
+      if (k === 'basis_note') S.draft.basis_note_auto = false;
+      if (['parking', 'heating'].includes(k)) { recompute(); const pt = document.querySelector('[data-k=parking_text]'); if (pt) pt.value = S.draft.parking_text; }
+    };
+  });
+}
+$('#remarks').oninput = () => { S.draft.remarks = $('#remarks').value; S.draft.remarks_auto = false; $('#remAuto').checked = false; };
+$('#remAuto').onchange = () => { S.draft.remarks_auto = $('#remAuto').checked; recompute(); $('#remarks').value = S.draft.remarks; };
+
+function renderSupply() {
+  const d = S.draft;
+  let h = `<tr><th>타입</th><th>전용(㎡)</th><th>공급(㎡)</th><th>(평)</th><th>세대</th><th>기준층 (층 · 세대수 · 금액)</th>
+    <th>공급금액(A)</th><th>확장비(B)</th><th>소계(A+B)</th><th>유상옵션(C)</th><th>합계 (C 제외)</th><th>평당</th></tr>`;
+  for (const [i, t] of d.types.entries()) {
+    const py = (t.supply || 0) * 0.3025;
+    const A = (t.price || 0) / 1000, B = (t.balcony || 0) / 1000;
+    const opts = (t.tiers || []).map((x, k) => `<option value="${k}" ${k === t.base ? 'selected' : ''}>${esc(x.floor)} · ${x.units}세대 · ${fmt(x.total / 1000)}</option>`).join('');
+    h += `<tr><td><b>${esc(t.abbr)}</b></td><td class="num">${fmt(t.excl, 4)}</td><td class="num">${fmt(t.supply, 4)}</td>
+      <td class="num">${fmt(py, 1)}</td><td class="num">${fmt(t.units)}</td>
+      <td>${opts ? `<select data-tier="${i}">${opts}</select>` : '<span class="err">층별 금액 없음</span>'}</td>
+      <td class="num"><input type="number" data-price="${i}" value="${A}" step="0.1"></td>
+      <td class="num"><input type="number" data-balc="${i}" value="${B}" step="0.1"></td>
+      <td class="num">${fmt(A + B, 1)}</td><td class="hint">직접 입력</td><td class="num">${fmt(A + B, 1)}</td>
+      <td class="num">${py ? fmt((A + B) / py) : ''}</td></tr>`;
+  }
+  h += `<tr><th colspan="4">소계</th><th>${fmt(d.households)}</th><th colspan="7" style="text-align:left">${esc(d.basis_note || '')} &nbsp; ${esc(d.avg_note || '')}</th></tr>`;
+  $('#sup').innerHTML = h;
+  document.querySelectorAll('[data-tier]').forEach(el => el.onchange = () => {
+    const t = d.types[el.dataset.tier]; t.base = Number(el.value); t.price_manual = false; refresh();
+  });
+  document.querySelectorAll('[data-price]').forEach(el => el.onchange = () => {
+    const t = d.types[el.dataset.price]; t.price = Math.round(Number(el.value) * 1000); t.price_manual = true; refresh();
+  });
+  document.querySelectorAll('[data-balc]').forEach(el => el.onchange = () => {
+    const t = d.types[el.dataset.balc]; t.balcony = Math.round(Number(el.value) * 1000); refresh();
+  });
+}
+function refresh() {
+  recompute(); renderSupply(); renderOptions();
+  $('#remarks').value = S.draft.remarks || '';
+  const n = document.querySelector('[data-k=avg_note]'); if (n) n.value = S.draft.avg_note;
+  const b = document.querySelector('[data-k=basis_note]'); if (b) b.value = S.draft.basis_note;
+}
+
+function renderOptions() {
+  const d = S.draft, gs = d.options || [], cols = d.option_cols || [];
+  if (!cols.length) { $('#opt').innerHTML = '<tr><td>공고에서 유상옵션 표를 찾지 못했습니다. 엑셀에서 직접 넣어 주세요.</td></tr>'; return; }
+  const gmap = {}; gs.forEach((g, i) => gmap[g.id] = i);
+  let h = `<tr><th>비고<br>포함</th><th>엑셀 칸 이름 (T열부터)</th><th>공고 품목</th><th>쪽</th>${d.types.map(t => `<th>${esc(t.abbr)}</th>`).join('')}</tr>`;
+  let last = null;
+  for (const [ci, c] of cols.entries()) {
+    const gi = gmap[c.group], g = gs[gi] || {};
+    const first = c.group !== last; last = c.group;
+    h += `<tr class="${g.include ? '' : 'off'}"><td>${first && gi !== undefined ? `<input type="checkbox" data-inc="${gi}" ${g.include ? 'checked' : ''}>` : ''}</td>
+      <td class="name"><input type="text" data-ohdr="${ci}" value="${esc(c.header || '')}" style="width:150px"></td>
+      <td class="name" title="${esc(g.detail || '')}">${first ? esc(g.name || c.name || '') : ''}</td><td>${c.page || ''}</td>`;
+    for (const t of d.types) {
+      const v = (c.values || {})[t.abbr];
+      h += v ? `<td class="num">${fmt(v / 1000)}</td>` : '<td class="hint">-</td>';
+    }
+    h += '</tr>';
+  }
+  $('#opt').innerHTML = h;
+  document.querySelectorAll('[data-inc]').forEach(el => el.onchange = () => { gs[el.dataset.inc].include = el.checked; refresh(); });
+  document.querySelectorAll('[data-ohdr]').forEach(el => el.oninput = () => { cols[el.dataset.ohdr].header = el.value; });
+}
+
+// ---------------------------------------------------------------- 5. 그림 (이 브라우저 안에만 둔다)
+function addImage(blob, w, h, label, kind) {
+  const id = 'i' + (++S.seq) + Math.random().toString(36).slice(2, 6);
+  S.imgs[id] = {id, blob, url: URL.createObjectURL(blob), w, h, label, kind};
+  S.order.push(id);
+  return id;
+}
+function loadImg(url) {
+  return new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('그림을 열지 못했습니다')); im.src = url; });
+}
+// PC 그림: PNG/JPG 는 그대로, 그 밖의 형식은 PNG 로 바꿔 둔다
+async function takeFile(f) {
+  const url = URL.createObjectURL(f);
+  try {
+    const im = await loadImg(url);
+    let blob = f;
+    if (!/^image\/(png|jpeg)$/.test(f.type)) {
+      const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+      c.getContext('2d').drawImage(im, 0, 0);
+      blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    }
+    return addImage(blob, im.naturalWidth, im.naturalHeight, f.name, 'upload');
+  } finally { URL.revokeObjectURL(url); }
+}
+const SLOT_NAMES = {location: '위치도', birdseye: '조감도', siteplan: '단지배치도', community: '커뮤니티'};
+function slotImgs(ids, emptyText) {
+  ids = (ids || []).filter(id => id && S.imgs[id]);
+  return ids.length ? ids.map(id => `<img src="${S.imgs[id].url}">`).join('') :
+    `<span class="empty">비어 있음 — 눌러서 넣기<br>(${emptyText || '비워 두면 양식 그림 그대로'})</span>`;
+}
+function renderImages() {
+  const im = S.draft.images = S.draft.images || {};
+  $('#slots').innerHTML = Object.entries(SLOT_NAMES).map(([k, n]) =>
+    `<div class="slot"><div class="t">${n}${k === 'community' ? ' <span class="hint">여러 장 가능</span>' : ''}</div>
+     <div class="ims" data-slot="${k}">${slotImgs(im[k])}</div></div>`).join('');
+  const u = im.units = im.units || {};
+  $('#units').innerHTML = `<tr><th>타입</th><th>기본형</th><th>확장형</th></tr>` + S.draft.types.map(t =>
+    `<tr><td><b>${esc(t.abbr)}</b></td>${['basic', 'ext'].map(k => `<td><div class="ims" data-unit="${esc(t.abbr)}" data-kind="${k}">${slotImgs([(u[t.abbr] || {})[k]], k === 'basic' ? '없으면 엑셀에 X 표' : '비워 두면 빈칸')}</div></td>`).join('')}</tr>`).join('');
+  document.querySelectorAll('[data-slot]').forEach(el => el.onclick = () => openPicker({slot: el.dataset.slot}));
+  document.querySelectorAll('[data-unit]').forEach(el => el.onclick = () => openPicker({unit: el.dataset.unit, kind: el.dataset.kind}));
+}
+function pickerTitle(p) { return p.slot ? SLOT_NAMES[p.slot] + ' 고르기' : `${p.unit} ${p.kind === 'basic' ? '기본형' : '확장형'} 평면도 고르기`; }
+function currentIds(p) {
+  const im = S.draft.images;
+  return p.slot ? (im[p.slot] || []) : [((im.units[p.unit] || {})[p.kind])].filter(Boolean);
+}
+function assign(p, id, toggle) {
+  const im = S.draft.images;
+  if (p.slot) {
+    let cur = im[p.slot] || [];
+    if (p.slot === 'community' && toggle) cur = cur.includes(id) ? cur.filter(x => x !== id) : cur.concat([id]);
+    else cur = id ? [id] : [];
+    im[p.slot] = cur;
+  } else {
+    im.units[p.unit] = im.units[p.unit] || {};
+    if (id) im.units[p.unit][p.kind] = id; else delete im.units[p.unit][p.kind];
+  }
+}
+function openPicker(p) {
+  S.picker = p;
+  $('#mtitle').textContent = pickerTitle(p);
+  $('#mcrop').classList.add('hidden'); $('#mgal').classList.remove('hidden');
+  const sel = new Set(currentIds(p));
+  const list = S.order.slice().reverse().map(id => S.imgs[id]);
+  $('#mgal').innerHTML = list.length ? list.map(c => `<div class="it ${sel.has(c.id) ? 'sel' : ''}" data-id="${c.id}">
+    <img src="${c.url}" loading="lazy"><small>${esc(c.label || '')}</small>
+    <small>${c.w}×${c.h} <a data-crop="${c.id}">자르기</a></small></div>`).join('')
+    : '<p class="hint">그림 후보가 없습니다. "PC 의 그림 넣기"로 넣거나 "공고 쪽에서 잘라 쓰기"를 눌러 주세요.</p>';
+  document.querySelectorAll('#mgal .it').forEach(el => el.onclick = e => {
+    if (e.target.dataset.crop) { e.stopPropagation(); openCrop({id: e.target.dataset.crop}); return; }
+    assign(p, el.dataset.id, true); renderImages();
+    if (p.slot === 'community') el.classList.toggle('sel'); else closePicker();
+  });
+  $('#modal').classList.remove('hidden');
+}
+function closePicker() { $('#modal').classList.add('hidden'); S.picker = null; }
+$('#mclose').onclick = closePicker;
+$('#mclear').onclick = () => { assign(S.picker, null, false); renderImages(); closePicker(); };
+$('#modal').onclick = e => { if (e.target.id === 'modal') closePicker(); };
+$('#upimg').onchange = async () => {
+  const fs = [...$('#upimg').files]; $('#upimg').value = '';
+  let last = null;
+  for (const f of fs) { try { last = await takeFile(f); } catch (e) { alert(f.name + ': ' + e.message); } }
+  if (last && fs.length === 1) { assign(S.picker, last, true); renderImages(); if (S.picker.slot !== 'community') { closePicker(); return; } }
+  openPicker(S.picker);
+};
+
+// 자르기 (그림 후보 또는 공고 쪽)
+let crop = null;
+async function openCrop(src) {
+  crop = {src, box: null};
+  $('#mgal').classList.add('hidden'); $('#mcrop').classList.remove('hidden'); $('#croprect').classList.add('hidden');
+  $('#pagenav').classList.toggle('hidden', !src.page);
+  $('#cropall').classList.toggle('hidden', !!src.page);
+  if (src.page) {
+    $('#cropimg').removeAttribute('src');
+    const r = await rpc('page', {page: src.page, zoom: 2});
+    if (!r.ok) { alert(r.error); return; }
+    if (crop.pageUrl) URL.revokeObjectURL(crop.pageUrl);
+    crop.pageBlob = new Blob([r.data], {type: 'image/png'}); crop.pageUrl = URL.createObjectURL(crop.pageBlob);
+    S.lastPage = r.page; $('#pno').value = r.page; $('#pcount').textContent = r.pages;
+    $('#cropimg').src = crop.pageUrl;
+  } else {
+    $('#cropimg').src = S.imgs[src.id].url;
+  }
+}
+$('#mpage').onclick = () => openCrop({page: S.lastPage || 1});
+$('#pprev').onclick = () => openCrop({page: Math.max(1, Number($('#pno').value) - 1)});
+$('#pnext').onclick = () => openCrop({page: Number($('#pno').value) + 1});
+$('#pno').onchange = () => openCrop({page: Number($('#pno').value) || 1});
+(() => {
+  const wrap = $('#cropwrap'), rect = $('#croprect');
+  let start = null;
+  const pos = e => { const r = $('#cropimg').getBoundingClientRect();
+    return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))]; };
+  const draw = (a, b) => { const r = $('#cropimg').getBoundingClientRect();
+    rect.style.left = Math.min(a[0], b[0]) * r.width + 'px'; rect.style.top = Math.min(a[1], b[1]) * r.height + 'px';
+    rect.style.width = Math.abs(a[0] - b[0]) * r.width + 'px'; rect.style.height = Math.abs(a[1] - b[1]) * r.height + 'px';
+    rect.classList.remove('hidden'); };
+  wrap.addEventListener('mousedown', e => { e.preventDefault(); start = pos(e); });
+  window.addEventListener('mousemove', e => { if (start) { const p = pos(e); draw(start, p); crop.box = [start[0], start[1], ...p]; } });
+  window.addEventListener('mouseup', () => { start = null; });
+})();
+function afterAssign() { renderImages(); if (S.picker.slot === 'community') openPicker(S.picker); else closePicker(); }
+$('#cropback').onclick = () => openPicker(S.picker);
+$('#cropall').onclick = () => { assign(S.picker, crop.src.id, true); afterAssign(); };
+$('#cropok').onclick = async () => {
+  if (!crop.box) { alert('그림 위에서 끌어서 영역을 고르세요.'); return; }
+  const im = $('#cropimg');
+  const W = im.naturalWidth, H = im.naturalHeight;
+  const [x0, y0, x1, y1] = crop.box;
+  const sx = Math.round(Math.min(x0, x1) * W), sy = Math.round(Math.min(y0, y1) * H);
+  const sw = Math.round(Math.abs(x1 - x0) * W), sh = Math.round(Math.abs(y1 - y0) * H);
+  if (sw < 20 || sh < 20) { alert('자를 영역이 너무 작습니다.'); return; }
+  const c = document.createElement('canvas'); c.width = sw; c.height = sh;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, sw, sh);
+  g.drawImage(im, sx, sy, sw, sh, 0, 0, sw, sh);
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+  const label = crop.src.page ? `공고 ${S.lastPage}쪽 자름` : (S.imgs[crop.src.id].label + ' 자름');
+  const id = addImage(blob, sw, sh, label, 'crop');
+  assign(S.picker, id, true); afterAssign();
+};
+
+// ---------------------------------------------------------------- 6. 만들기
+$('#build').onclick = async () => {
+  const d = S.draft;
+  d.output_name = $('#outname').value.trim(); d.delete_hidden = $('#delHidden').checked;
+  d.remarks = $('#remarks').value;
+  const miss = d.types.filter(t => !t.price).map(t => t.abbr);
+  if (miss.length && !confirm(`공급금액이 없는 타입이 있습니다: ${miss.join(', ')}\n그래도 만들까요?`)) return;
+  const im = d.images || {}, used = new Set();
+  for (const k of Object.keys(SLOT_NAMES)) (im[k] || []).forEach(id => used.add(id));
+  for (const u of Object.values(im.units || {})) for (const id of Object.values(u)) used.add(id);
+  const images = [];
+  for (const id of used) if (S.imgs[id]) images.push({id, data: await S.imgs[id].blob.arrayBuffer()});
+  $('#build').disabled = true; $('#buildmsg').textContent = '엑셀 작성 중…'; $('#result').classList.add('hidden');
+  $('#status').textContent = '엑셀 작성 중';
+  const r = await rpc('build', {draft: d, images}, images.map(x => x.data));
+  $('#build').disabled = false;
+  if (!r.ok) { $('#buildmsg').innerHTML = `<span class="err">${esc(r.error)}</span>`; $('#status').textContent = '오류'; return; }
+  $('#status').textContent = '완성';
+  $('#buildmsg').innerHTML = `<span class="ok">완성 (${r.sec}초)</span>`;
+  const blob = new Blob([r.xlsx], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  if (S.dlUrl) URL.revokeObjectURL(S.dlUrl);
+  S.dlUrl = URL.createObjectURL(blob);
+  $('#dl').href = S.dlUrl; $('#dl').download = r.name; $('#resname').textContent = r.name;
+  $('#result').classList.remove('hidden');
+};
+</script>
+</body>
+</html>
