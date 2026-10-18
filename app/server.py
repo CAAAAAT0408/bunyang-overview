@@ -188,25 +188,7 @@ def public_cands(cands):
     return [{k: c.get(k) for k in keep} for c in cands]
 
 
-def block_of(draft):
-    m = re.search(r'\(([A-Za-z]*-?\d+)\s*BL\)', draft.get('title', '')) or \
-        re.search(r'([A-Za-z]*-?\d+)\s*(?:BL|블록|블럭)', draft.get('location', ''))
-    return (m.group(1) + 'BL') if m else ''
-
-
-def prefer_nums(draft):
-    nums = set(re.findall(r'(\d)\s*단지', draft.get('title', '')))
-    b = block_of(draft)
-    if b and re.fullmatch(r'\d+BL', b) and len(b) == 3:
-        nums.add(b[0])
-    return nums
-
-
-def prefer_tokens(draft):
-    """단지명 속 번호 ('아크메르 동탄 99' → ['99']) — 한 홈페이지에 단지가 여럿일 때 우리 단지 그림 고르기"""
-    name = draft.get('complex_name') or draft.get('title') or ''
-    return sorted(set(re.findall(r'(?<![\d.])(\d{2,3})(?![\d])', name)))
-
+from engine.webcollect import prefer_nums, prefer_tokens  # noqa: E402  (웹 버전과 같이 씀)
 
 IMAGE_SLOTS = ('location', 'birdseye', 'siteplan', 'community', 'mh_map')
 UNIT_KINDS = ('basic', 'ext', 'iso')

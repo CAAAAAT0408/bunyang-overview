@@ -100,14 +100,20 @@ def iri(url):
         return url
 
 
-def fetch(url, referer=None, timeout=20, binary=False):
-    url = iri(url)
+def urllib_get(url, referer=None, timeout=20):
+    """주소 내용 받기 → (최종 주소, Content-Type, bytes). 웹 버전(브라우저)은 bridge 가 중계 서버로 받는 함수로 바꿔 끼운다"""
     req = urllib.request.Request(url, headers={'User-Agent': UA, 'Accept-Language': 'ko-KR,ko;q=0.9',
                                                **({'Referer': referer} if referer else {})})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = r.read()
-        final = r.geturl()
-        ctype = r.headers.get('Content-Type', '')
+        return r.geturl(), r.headers.get('Content-Type', ''), r.read()
+
+
+http_get = urllib_get
+
+
+def fetch(url, referer=None, timeout=20, binary=False):
+    url = iri(url)
+    final, ctype, data = http_get(url, referer, timeout)
     if binary:
         return final, ctype, data
     enc = 'utf-8'
@@ -405,42 +411,55 @@ class Collector:
             shutil.rmtree(prof, ignore_errors=True)
 
     # -------------------------------------------------------------- 그림 받기
-    def download(self, max_imgs=160):
-        from PIL import Image
-        n = 0
+    def image_list(self, limit=240):
+        """읽은 쪽들의 그림 주소 (아이콘·팝업·이미 받은 것 빼고) → [{src, page, menu, title, alt}]"""
+        out = []
         for pg in self.pages:
             for im in pg['imgs']:
                 src = im['src']
-                if SKIP_IMG.search(src) or src in self.seen_img:
-                    continue
-                if re.search(r'popup|/pop_|pop\d', src, re.I):
+                if SKIP_IMG.search(src) or src in self.seen_img or re.search(r'popup|/pop_|pop\d', src, re.I):
                     continue
                 self.seen_img[src] = None
-                if n >= max_imgs:
-                    break
-                try:
-                    _, ctype, data = fetch(src, referer=pg['url'], binary=True, timeout=25)
-                except Exception as e:
-                    self.errors.append(f'{src}: {e}')
-                    continue
-                if len(data) < 15_000:
-                    continue
-                try:
-                    img = Image.open(io.BytesIO(data))
-                    img.load()
-                except Exception:
-                    continue
-                w, h = img.size
-                if w < 500 or h < 300:
-                    continue
-                cid = 'w' + hashlib.md5(data).hexdigest()[:10]
-                if any(c['id'] == cid for c in self.cands):
-                    continue
-                path = self.save(img, cid)
-                self.seen_img[src] = cid
-                self.cands.append({'id': cid, 'file': path, 'w': w, 'h': h, 'src': src, 'page': pg['url'],
-                                   'menu': pg.get('menu', ''), 'title': pg.get('title', ''), 'alt': im.get('alt', ''),
-                                   'kind': 'web'})
+                out.append({'src': src, 'page': pg['url'], 'menu': pg.get('menu', ''), 'title': pg.get('title', ''),
+                            'alt': im.get('alt', '')})
+                if len(out) >= limit:
+                    return out
+        return out
+
+    def add_image(self, data, it):
+        """받은 그림 하나 → 후보 (작은 그림·같은 그림 빼고). 넣었으면 후보, 아니면 None"""
+        from PIL import Image
+        if not data or len(data) < 15_000:
+            return None
+        try:
+            img = Image.open(io.BytesIO(data))
+            w, h = img.size
+            if w < 500 or h < 300 or h > 7000 or w * h > 16_000_000:
+                return None                     # 작은 그림, 마감재 목록 같은 아주 긴 그림 (풀면 메모리를 많이 씀)
+            img.load()
+        except Exception:
+            return None
+        cid = 'w' + hashlib.md5(data).hexdigest()[:10]
+        if any(c['id'] == cid for c in self.cands):
+            return None
+        path = self.save(img, cid)
+        self.seen_img[it['src']] = cid
+        c = {'id': cid, 'file': path, 'w': w, 'h': h, 'src': it['src'], 'page': it['page'], 'menu': it.get('menu', ''),
+             'title': it.get('title', ''), 'alt': it.get('alt', ''), 'kind': 'web'}
+        self.cands.append(c)
+        return c
+
+    def download(self, max_imgs=160):
+        n = 0
+        for it in self.image_list():
+            if n >= max_imgs:
+                break
+            try:
+                _, ctype, data = fetch(it['src'], referer=it['page'], binary=True, timeout=25)
+            except Exception as e:
+                self.errors.append(f"{it['src']}: {e}")
+                continue
+            if self.add_image(data, it):
                 n += 1
         self.log(f'그림 {len(self.cands)}장 받음')
 
@@ -582,6 +601,7 @@ class Collector:
         need = sorted({c['file'] for hs in per.values() for c in hs
                        if label_of(c) is None and (parts.get(c['id']) or {}).get('plans')})
         ocr = ocr_lines(need, self.log) if need else {}
+        ocr_ok = bool(ocr) or not need                  # 웹 버전(브라우저)은 Windows OCR 이 없다
         names = {'basic': '기본형', 'ext': '확장형', 'iso': '아이소'}
         out = {}
         nsheet = 0
@@ -608,6 +628,12 @@ class Collector:
                             if k not in got:
                                 got[k] = (c, plans[i]['box'])
                             done.add(i)
+                        if not ocr_ok and not done and len(plans) == 2 and plans[1]['area'] >= 0.7 * plans[0]['area']:
+                            # OCR 없이 표기 없는 비슷한 2D 평면 두 장 → 읽는 순서대로 기본형·확장형 (자이 등 관례)
+                            a, b = sorted(plans, key=lambda p: (p['box'][1] // 60, p['box'][0]))
+                            got.setdefault('basic', (c, a['box']))
+                            got.setdefault('ext', (c, b['box']))
+                            done = {0, 1}
                         rest = [b for i, b in enumerate(plans) if i not in done]
                         if rest and unl is None:
                             unl = (c, rest[0]['box'])
@@ -670,6 +696,10 @@ class Collector:
             except Exception as e:
                 self.errors.append(f'Edge 읽기 실패: {e}')
                 self.log(f'Edge 읽기 실패: {e}')
+        return self.finish()
+
+    def finish(self):
+        """모은 그림 → 자동 배정 (분류·평면 나누기·자르기)"""
         try:
             self.ocr_type_names()
         except Exception as e:
@@ -698,6 +728,23 @@ class Collector:
         return {'cands': self.cands, 'auto': auto,
                 'pages': [{'url': p['url'], 'menu': p.get('menu', ''), 'title': p.get('title', '')} for p in self.pages],
                 'errors': self.errors[:20], 'text': self.all_text()[:200000]}
+
+
+def prefer_nums(draft):
+    """우리 단지 번호 ('1단지'·'1BL' 의 1) — 그림 설명에 이 번호가 있으면 우선"""
+    nums = set(re.findall(r'(\d)\s*단지', draft.get('title', '')))
+    m = re.search(r'\(([A-Za-z]*-?\d+)\s*BL\)', draft.get('title', '')) or \
+        re.search(r'([A-Za-z]*-?\d+)\s*(?:BL|블록|블럭)', draft.get('location', ''))
+    b = (m.group(1) + 'BL') if m else ''
+    if b and re.fullmatch(r'\d+BL', b) and len(b) == 3:
+        nums.add(b[0])
+    return nums
+
+
+def prefer_tokens(draft):
+    """단지명 속 번호 ('아크메르 동탄 99' → ['99']) — 한 홈페이지에 단지가 여럿일 때 우리 단지 그림 고르기"""
+    name = draft.get('complex_name') or draft.get('title') or ''
+    return sorted(set(re.findall(r'(?<![\d.])(\d{2,3})(?![\d])', name)))
 
 
 def text_label(text):

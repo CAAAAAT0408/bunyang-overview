@@ -94,6 +94,9 @@ footer a{color:var(--accent)}
       <input type="file" accept=".xlsx,.xlsm"></div>
   </div>
   <div class="row">
+    <label>분양 홈페이지 <input type="text" id="home" size="44" placeholder="https://… (넣으면 그림을 자동으로 모읍니다, 비워도 됨)"></label>
+  </div>
+  <div class="row">
     <button id="go" disabled>분석하기</button>
     <span class="hint">공고 분석에 30초~2분 걸립니다. 공고 파일 이름을 <b>경기-오산-양산4지구(1BL)-GS-입주자모집공고.pdf</b> 처럼 붙이면 제목·저장 이름이 맞게 나옵니다.</span>
   </div>
@@ -130,9 +133,14 @@ footer a{color:var(--accent)}
   </section>
 
   <section class="card">
-    <h2><span class="n">5</span>그림 <span class="hint">칸을 누르면 PC 의 그림을 넣거나, 공고 PDF 속 그림을 고르거나, 공고 쪽을 보며 필요한 부분을 잘라 넣을 수 있습니다. 비워 둔 칸은 양식의 그림을 그대로 둡니다.</span></h2>
+    <h2><span class="n">5</span>그림 <span class="hint">홈페이지에서 모은 그림이 자동으로 들어갑니다. 칸을 누르면 다른 그림을 고르거나, 자르거나, PC 의 그림·공고 PDF 속 그림을 넣을 수 있습니다. 비워 둔 칸은 양식의 그림을 그대로 둡니다.</span></h2>
+    <div class="row" style="margin:0 0 12px">
+      <label>홈페이지 <input type="text" id="home2" size="50"></label>
+      <button class="sub small" id="recollect">이 주소로 그림 모으기</button>
+      <span class="hint">1~3분. 스크립트로 그리는 홈페이지는 그림을 못 가져올 수 있습니다 — 그때는 그림을 저장해 직접 넣어 주세요.</span>
+    </div>
     <div class="slots" id="slots"></div>
-    <div class="units"><b>단위세대 평면도</b> <span class="hint">엑셀 두 칸: 기본형이 있으면 기본형·확장형, 기본형이 없고 아이소가 있으면 확장형·아이소, 둘 다 없으면 기본형 칸 X 표. 평면 옆 키맵(작은 단지배치도)은 "자르기"로 빼 주세요.</span><div class="scroll"><table id="units"></table></div></div>
+    <div class="units"><b>단위세대 평면도</b> <span class="hint">엑셀 두 칸: 기본형이 있으면 기본형·확장형, 기본형이 없고 아이소가 있으면 확장형·아이소, 둘 다 없으면 기본형 칸 X 표. 홈페이지에서 모은 평면은 키맵(작은 단지배치도)을 잘라 내고 넣습니다.</span><div class="scroll"><table id="units"></table></div></div>
   </section>
 
   <section class="card">
@@ -151,7 +159,8 @@ footer a{color:var(--accent)}
   </section>
 </div>
 </main>
-<footer>공고·양식·그림 파일은 이 브라우저 밖으로 나가지 않습니다 (PDF 읽기·엑셀 작성 모두 브라우저 안 Python 으로 처리).
+<footer>공고·양식 파일은 이 브라우저 밖으로 나가지 않습니다 (PDF 읽기·엑셀 작성 모두 브라우저 안 Python 으로 처리).
+  홈페이지 그림 모으기만 분양 홈페이지 주소를 Cloudflare 중계로 보내 그림을 받아 옵니다.
   처음 열 때 부품을 받느라 시간이 걸리고, 그 뒤로는 브라우저에 저장돼 빨라집니다. 크롬·엣지 최신판에서 쓰세요.</footer>
 
 <div id="modal" class="hidden"><div class="box">
@@ -174,7 +183,7 @@ footer a{color:var(--accent)}
 </div></div>
 
 <script>
-const VERSION = '2026.10.18a';
+const VERSION = '2026.10.18b';
 const $ = s => document.querySelector(s);
 const S = {draft: null, files: {}, imgs: {}, order: [], picker: null, seq: 0};
 const fmt = (v, d = 0) => (v === null || v === undefined || v === '' || isNaN(v)) ? '' :
@@ -229,13 +238,63 @@ $('#go').onclick = async () => {
   if (!r.ok) { $('#status').textContent = '오류'; addLog('✖ ' + r.error); return; }
   $('#status').textContent = '확인 대기';
   S.draft = r.draft; S.imgs = {}; S.order = []; S.pages = null;
+  S.draft.homepage = $('#home').value.trim();
   renderAll(); $('#review').classList.remove('hidden');
   const p = await rpc('pdf_images', {});
   if (p.ok) {
     for (const m of p.list) addImage(new Blob([m.data], {type: m.ext === 'png' ? 'image/png' : 'image/jpeg'}), m.w, m.h, `공고 ${m.page}쪽`, 'pdf');
     if (p.list.length) addLog(`공고 PDF 속 그림 ${p.list.length}장을 그림 후보에 넣었습니다.`);
   }
+  if (S.draft.homepage) await collect(S.draft.homepage);
 };
+
+// 홈페이지 그림 모으기 (중계 서버 → 브라우저 안에서 분류·자르기, 서버 버전과 같은 규칙)
+// 공고 분석 작업 공간과 따로 띄운다 (collect.js) — 공고 PDF 를 읽은 쪽은 메모리가 커서 그림 부품이 멈추는 일이 있음
+let cworker = null;
+const cpending = {};
+function crpc(args) {
+  if (!cworker) {
+    cworker = new Worker('collect.js?v=' + VERSION, {type: 'module'});
+    cworker.onmessage = e => {
+      const d = e.data;
+      if (d.status !== undefined) { $('#status').textContent = d.status || '그림 모으는 중'; return; }
+      if (d.log !== undefined) { addLog(d.log); return; }
+      if (cpending[d.id]) { cpending[d.id](d.result); delete cpending[d.id]; }
+    };
+    cworker.onerror = e => {
+      for (const k of Object.keys(cpending)) { cpending[k]({ok: false, error: '그림 모으기 작업 공간을 띄우지 못했습니다 ' + (e.message || '')}); delete cpending[k]; }
+      cworker = null;
+    };
+  }
+  return new Promise(res => { const id = ++rseq; cpending[id] = res; cworker.postMessage({id, args}); });
+}
+async function collect(home) {
+  if (!home) return;
+  $('#recollect').disabled = true; $('#status').textContent = '그림 모으는 중';
+  addLog('분양 홈페이지에서 그림 모으기 (1~3분)');
+  const d = S.draft;
+  const r = await crpc({home, draft: {types: d.types, title: d.title, location: d.location, complex_name: d.complex_name}});
+  $('#recollect').disabled = false; $('#status').textContent = '확인 대기';
+  if (!r.ok) { addLog('✖ ' + r.error); return; }
+  const map = {};
+  for (const c of r.list) {
+    map[c.id] = addImage(new Blob([c.data], {type: 'image/jpeg'}), c.w, c.h, `${c.menu || ''} ${c.alt || ''}`.trim() || '홈페이지', c.kind);
+  }
+  const im = S.draft.images = S.draft.images || {};
+  for (const k of Object.keys(SLOT_NAMES)) {
+    const ids = (r.auto[k] || []).map(i => map[i]).filter(Boolean);
+    if (ids.length) im[k] = ids;
+  }
+  im.units = im.units || {};
+  for (const [a, u] of Object.entries(r.auto.units || {})) {
+    im.units[a] = {};
+    for (const [k, v] of Object.entries(u)) if (map[v]) im.units[a][k] = map[v];
+  }
+  S.draft.homepage = home;
+  const hp = document.querySelector('[data-k=homepage]'); if (hp) hp.value = home;
+  renderImages();
+  addLog(`홈페이지 그림 ${r.list.length}장을 후보에 넣고 칸에 배정했습니다. 아래 5번에서 확인하세요.`);
+}
 
 // ---------------------------------------------------------------- 계산 (엔진 finalize 와 같게)
 function trunc2(x) { return (Math.floor(x * 100) / 100).toFixed(2); }
@@ -429,6 +488,7 @@ function renderImages() {
     `<div class="slot"><div class="t">${n}${k === 'community' ? ' <span class="hint">여러 장 가능</span>' : ''}</div>
      <div class="ims" data-slot="${k}">${slotImgs(im[k])}</div></div>`).join('');
   const u = im.units = im.units || {};
+  $('#home2').value = S.draft.homepage || '';
   $('#units').innerHTML = `<tr><th>타입</th><th>기본형 (비확장)</th><th>확장형</th><th>아이소 (3D)</th></tr>` + S.draft.types.map(t =>
     `<tr><td><b>${esc(t.abbr)}</b></td>${Object.keys(UNIT_KINDS).map(k => `<td><div class="ims" data-unit="${esc(t.abbr)}" data-kind="${k}">${slotImgs([(u[t.abbr] || {})[k]], k === 'basic' ? '없으면 엑셀에 X 표 (아이소가 있으면 확장형·아이소)' : k === 'iso' ? '기본형이 없을 때만 엑셀에 들어감' : '비워 두면 빈칸')}</div></td>`).join('')}</tr>`).join('');
   document.querySelectorAll('[data-slot]').forEach(el => el.onclick = () => openPicker({slot: el.dataset.slot}));
@@ -470,6 +530,7 @@ function openPicker(p) {
 }
 function closePicker() { $('#modal').classList.add('hidden'); S.picker = null; }
 $('#mclose').onclick = closePicker;
+$('#recollect').onclick = () => collect($('#home2').value.trim());
 $('#mclear').onclick = () => { assign(S.picker, null, false); renderImages(); closePicker(); };
 $('#modal').onclick = e => { if (e.target.id === 'modal') closePicker(); };
 $('#upimg').onchange = async () => {

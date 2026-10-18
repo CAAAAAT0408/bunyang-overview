@@ -18,3 +18,7 @@ tests/
 *.png
 *.jpg
 ~$*
+
+# Cloudflare 중계 올릴 때 생기는 파일
+.wrangler/
+node_modules/

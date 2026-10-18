@@ -5,7 +5,9 @@
 
 **바로 쓰기: https://caaaaat0408.github.io/bunyang-overview/**
 
-- 파일은 서버로 보내지 않습니다. 브라우저 안에서 Python([Pyodide](https://pyodide.org))으로 PDF 를 읽고 엑셀을 만듭니다.
+- 공고·양식 파일은 서버로 보내지 않습니다. 브라우저 안에서 Python([Pyodide](https://pyodide.org))으로 PDF 를 읽고 엑셀을 만듭니다.
+- 분양 홈페이지 주소를 넣으면 그림을 자동으로 모아 자릅니다 (위치도·조감도·배치도·커뮤니티·견본주택 위치도·평면).
+  브라우저는 다른 사이트를 직접 못 읽어서 Cloudflare 중계(`proxy/`)를 거칩니다 — 이 페이지에서 부를 때만 응답합니다.
 - 처음 열 때 부품(약 35MB)을 받느라 30초~1분 걸리고, 그 뒤로는 브라우저에 저장돼 빨라집니다.
 - 크롬·엣지 최신판에서 쓰세요. 인터넷이 연결돼 있어야 합니다(부품을 cdn.jsdelivr.net 에서 받습니다).
 
@@ -22,7 +24,9 @@
    - 비워 둔 칸은 양식의 그림을 그대로 둡니다. "견본주택 위치도 (O6)" 는 인쇄영역 밖 O6 칸에 들어갑니다.
    - 단위세대는 기본형(비확장)·확장형·아이소(3D) 칸이 있고, 엑셀 두 칸에는 기본형이 있으면 기본형·확장형,
      기본형이 없고 아이소가 있으면 확장형·아이소, 둘 다 없으면 기본형 칸 X 표 + 확장형이 들어갑니다.
-   - 분양 홈페이지에서 그림을 자동으로 모으고 자르기(배치도만·도면만·키맵 빼기)는 사내 서버 버전(`app/`)에서 합니다.
+   - 1번에서 홈페이지 주소를 넣었거나 5번의 "이 주소로 그림 모으기" 를 누르면 홈페이지 그림을 모아 자동으로 넣습니다
+     (단지배치도는 위에서 본 배치도만, 커뮤니티는 도면만, 평면은 키맵 빼고 — 서버 버전과 같은 규칙).
+     스크립트로 그리는 홈페이지는 웹 버전에서 그림을 못 가져올 수 있고, 그림 속 글자 읽기(Windows OCR)는 서버 버전에만 있습니다.
 4. **엑셀 만들기** → **엑셀 내려받기**. 계산식 값은 파일을 Excel 로 열면 계산됩니다.
 
 ## 칸별로 어디서 가져오나
@@ -47,14 +51,18 @@
 | 경로 | 내용 |
 |---|---|
 | `docs/` | 웹 버전 (GitHub Pages). `index.html` 화면, `worker.js` 가 Pyodide + PyMuPDF 를 띄워 `py/` 의 엔진을 실행 |
-| `docs/py/engine/` | 공고 분석 (`notice.py`, `pdfdoc.py`), 유상옵션 (`options.py`), 양식에 넣을 값 (`draft.py`) — `app/engine/` 과 같은 파일 |
+| `docs/collect.js`, `docs/py/collect.py` | 홈페이지 그림 모으기 — 공고 분석과 따로 띄우는 작업 공간 (Pyodide + Pillow). 공고 PDF 를 읽은 쪽은 메모리가 커서 그 뒤에 Pillow 가 멈추는 일이 있어 나눔 |
+| `docs/py/engine/` | 공고 분석 (`notice.py`, `pdfdoc.py`), 유상옵션 (`options.py`), 양식에 넣을 값 (`draft.py`), 그림 모으기·자르기 (`webcollect.py`, `imgcut.py`) — `app/engine/` 과 같은 파일 |
+| `proxy/` | Cloudflare Worker 중계 (`https://bunyang-proxy.bunyang-overview.workers.dev`): 분양 홈페이지의 쪽·그림만, 웹 버전 주소에서 부를 때만 |
 | `docs/py/build_web.py` | 엑셀 없이 xlsx 내부 XML 을 고쳐 양식을 채움 (서식·병합·그림 틀·인쇄설정 유지, 줄 늘리기·줄이기, 그림 넣기, 공고자료 시트) |
 | `docs/py/xlsxio.py` | xlsx 내부 XML 편집 도구 (행 넣기·지우기 때 수식·병합·그림 위치를 같이 옮김) |
 | `app/` | 사내망 서버 버전 (PC 의 Excel 로 작성, 분양 홈페이지 그림 자동 수집). `페이지 열기.bat` 으로 실행 |
 
 ## 업데이트할 때
 
-- 공고 분석을 고치면 `app/engine/` 의 `notice.py`·`options.py`·`draft.py`·`pdfdoc.py` 를 `docs/py/engine/` 에도 복사합니다.
-- `docs/py/*.py` 를 고친 뒤 `docs/worker.js` 와 `docs/index.html` 안의 `VERSION` 값을 바꿔야 팀원 브라우저가 새 파일을 받습니다.
+- 공고 분석·그림 규칙을 고치면 `app/engine/` 의 `notice.py`·`options.py`·`draft.py`·`pdfdoc.py`·`webcollect.py`·`imgcut.py` 를
+  `docs/py/engine/` 에도 복사합니다.
+- `docs/py/*.py` 를 고친 뒤 `docs/worker.js`·`docs/collect.js`·`docs/index.html` 안의 `VERSION` 값을 바꿔야 팀원 브라우저가 새 파일을 받습니다.
+- 중계를 고치면 `proxy/` 에서 `npx wrangler deploy` (Cloudflare 계정 taysha0508@gmail.com, 무료 플랜 하루 10만 요청).
 
 PDF 읽기에 쓰는 PyMuPDF 브라우저 빌드는 [@bentopdf/pymupdf-wasm](https://www.npmjs.com/package/@bentopdf/pymupdf-wasm) (AGPL-3.0) 을 jsDelivr 에서 받습니다.
