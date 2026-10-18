@@ -901,7 +901,7 @@ class NoticeParser:
     def payment_terms(self):
         heads = ' '.join(getattr(self, '_payment_heads', []))
         dep = re.search(r'계약금\s*\(?\s*(\d+)\s*%', heads)
-        mid = re.findall(r'(\d+)\s*[차회]\s*\(?\s*(\d+)\s*%', heads) + \
+        mid = re.findall(r'(\d+)\s*(?:회차|차|회)\s*\(?\s*(\d+)\s*%', heads) + \
             re.findall(r'(\d+)\s*차\s*중도금\s*\(?\s*(\d+)\s*%', heads)
         midtot = re.search(r'중도금\s*\(?\s*(\d+)\s*%', heads)
         bal = re.search(r'잔금\s*\(?\s*(\d+)\s*%', heads)
@@ -924,6 +924,10 @@ class NoticeParser:
             out['mid_pct_total'] = out['mid_each'] * out['mid_count']
         ff = [x for x in getattr(self, '_fixed_first', []) if x]
         out['first_fixed'] = max(set(ff), key=ff.count) if ff and ff.count(max(set(ff), key=ff.count)) >= len(ff) * 0.8 else None
+        if ff and out['first_fixed'] is None:
+            # 타입마다 다르면(84 타입 1천만원·큰 타입 3천만원) 첫 타입 금액 (2026-10-18 사용자 파일 기준)
+            out['first_fixed'] = ff[0]
+            out['first_fixed_mixed'] = sorted(set(ff))
         mid_txt = ' '.join(l.text for l in self.lines if '중도금' in l.text)
         if '이자후불' in mid_txt.replace(' ', ''):
             out['interest'] = '이자후불제'

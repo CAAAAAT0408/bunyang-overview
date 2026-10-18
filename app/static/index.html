@@ -117,7 +117,7 @@ td input[type=number]{width:90px;text-align:right}
   </section>
 
   <section class="card">
-    <h2><span class="n">3</span>공급개요 <span class="hint">공급금액 = 타입별 세대수가 가장 많은 층의 금액, 같으면 가장 높은 층 (기준층을 바꿀 수 있음) · 금액 단위 천원 · 유상옵션(C)는 엑셀에서 직접 입력</span></h2>
+    <h2><span class="n">3</span>공급개요 <span class="hint">공급금액 = 타입별 세대수가 가장 많은 층의 금액, 같으면 가장 높은 층 (기준층을 바꿀 수 있음) · 금액 단위 천원 · 유상옵션(C) = 4번에서 체크한 품목 합계</span></h2>
     <div class="scroll"><table id="sup"></table></div>
     <div class="two" style="margin-top:12px">
       <div class="grid" id="notes"></div>
@@ -127,7 +127,7 @@ td input[type=number]{width:90px;text-align:right}
   </section>
 
   <section class="card">
-    <h2><span class="n">4</span>유상옵션 <span class="hint">공고의 유상옵션 전체를 엑셀 공급개요 오른쪽(T열부터)에 타입별 한 줄로 적습니다 (단위 천원) · 체크한 품목은 비고의 "포함 품목"에 적힘 · 합계(C)는 직접 입력</span></h2>
+    <h2><span class="n">4</span>유상옵션 <span class="hint">체크한 품목만 엑셀 공급개요 오른쪽(Q열부터)에 타입별 한 줄로 적고 비고의 "포함 품목"에 적습니다 (단위 천원, 품목마다 고른 안 하나) · 유상옵션(C) = 그 합계</span></h2>
     <div class="scroll"><table class="opt" id="opt"></table></div>
   </section>
 
@@ -138,7 +138,7 @@ td input[type=number]{width:90px;text-align:right}
       <button class="sub small" id="recollect">이 주소로 다시 수집</button>
     </div>
     <div class="slots" id="slots"></div>
-    <div class="units"><b>단위세대 평면도</b><div class="scroll"><table id="units"></table></div></div>
+    <div class="units"><b>단위세대 평면도</b> <span class="hint">엑셀 두 칸: 기본형이 있으면 기본형·확장형, 기본형이 없고 아이소가 있으면 확장형·아이소, 둘 다 없으면 기본형 칸 X 표. 평면 옆 키맵(작은 단지배치도)은 잘라 냅니다.</span><div class="scroll"><table id="units"></table></div></div>
   </section>
 
   <section class="card">
@@ -297,14 +297,18 @@ function renderAll() {
     field('단지규모', 'scale') + field('단지특징', 'features', {after: '<div class="hint">공고에 없는 항목입니다. 입지 특징을 적어 주세요.</div>'}) +
     `<label>주차대수</label><div><input type="number" data-k="parking" value="${d.parking ?? ''}" style="width:110px"> 대 ·
        난방 <input type="text" data-k="heating" value="${esc(d.heating)}" style="width:90px">${pkhint}</div>` +
-    field('주차대수/난방방식', 'parking_text') + field('위탁/수탁/시공', 'developers') + field('견본주택', 'model_house');
+    field('주차대수/난방방식', 'parking_text') + field('시행/시공 칸 이름', 'developers_label', {ph: '위탁/수탁/시공 또는 시행/시공'}) +
+    field('시행/시공 업체', 'developers', {after: '<div class="hint">업체 3곳(위탁 / 수탁 / 시공)이면 칸 이름이 "위탁/수탁/시공", 2곳이면 "시행/시공"으로 자동으로 바뀝니다.</div>'}) +
+    field('견본주택', 'model_house');
   $('#sch').innerHTML = field('M/H 오픈일', 'mh_open', {type: 'date'}) + field('모집공고', 'notice_date', {type: 'date'}) +
     field('청약일정', 'subscription') + field('당첨자발표', 'winners', {type: 'date'}) + field('계약일정', 'contract') +
     field('입주예정', 'move_in') + field('홈페이지', 'homepage', {ph: '직접 입력 (엑셀 인쇄영역 밖 칸)'}) +
-    `<label></label><div class="hint">M/H 오픈일이 공고에 없으면 비어 있습니다. 직접 넣어 주세요.</div>`;
+    `<label></label><div class="hint">M/H 오픈일이 공고에 없으면 비워 두세요. 엑셀에는 모집공고일과 같게(=모집공고 칸) 들어갑니다.</div>`;
   $('#notes').innerHTML = field('구분 칸', 'label', {type: 'area', rows: 4}) + field('소계 줄 문구', 'basis_note') +
     field('평균평당가', 'avg_note', {ro: true}) + field('납부조건', 'payment_note') +
-    field('유상옵션 기준', 'option_note', {ph: '비워 두면 양식 문구 그대로'});
+    field('유상옵션 기준', 'option_note', {ph: '비워 두면 양식 문구 그대로'}) +
+    field('보고자료 오픈동향', 'report_trend', {type: 'area', rows: 2}) + field('보고자료 오픈보고', 'report_open', {type: 'area', rows: 3,
+      after: '<div class="hint">"보고자료" 시트에 들어갑니다. 고치지 않으면 엑셀 만들 때 세대수·평균평당가로 다시 씁니다.</div>'});
   $('#remarks').value = d.remarks || ''; $('#remAuto').checked = d.remarks_auto !== false;
   $('#outname').value = d.output_name || ''; $('#delHidden').checked = d.delete_hidden !== false;
   $('#home2').value = d.homepage || '';
@@ -319,6 +323,12 @@ function bindFields() {
       S.draft[k] = v;
       if (k === 'parking_text') S.draft.parking_text_auto = false;
       if (k === 'basis_note') S.draft.basis_note_auto = false;
+      if (k === 'developers_label') S.draft.developers_label_auto = false;
+      if (k === 'report_trend' || k === 'report_open') S.draft.report_auto = false;
+      if (k === 'developers' && S.draft.developers_label_auto !== false) {
+        S.draft.developers_label = v.split(' / ').length >= 3 ? '위탁/수탁/시공' : '시행/시공';
+        const dl = document.querySelector('[data-k=developers_label]'); if (dl) dl.value = S.draft.developers_label;
+      }
       if (['parking', 'heating'].includes(k)) { recompute(); const pt = document.querySelector('[data-k=parking_text]'); if (pt) pt.value = S.draft.parking_text; }
     };
   });
@@ -329,17 +339,17 @@ $('#remAuto').onchange = () => { S.draft.remarks_auto = $('#remAuto').checked; r
 function renderSupply() {
   const d = S.draft;
   let h = `<tr><th>타입</th><th>전용(㎡)</th><th>공급(㎡)</th><th>(평)</th><th>세대</th><th>기준층 (층 · 세대수 · 금액)</th>
-    <th>공급금액(A)</th><th>확장비(B)</th><th>소계(A+B)</th><th>유상옵션(C)</th><th>합계 (C 제외)</th><th>평당</th></tr>`;
+    <th>공급금액(A)</th><th>확장비(B)</th><th>소계(A+B)</th><th>유상옵션(C)</th><th>합계(A+B+C)</th><th>평당</th></tr>`;
   for (const [i, t] of d.types.entries()) {
     const py = (t.supply || 0) * 0.3025;
-    const A = (t.price || 0) / 1000, B = (t.balcony || 0) / 1000;
+    const A = (t.price || 0) / 1000, B = (t.balcony || 0) / 1000, C = (t.option_total || 0) / 1000;
     const opts = (t.tiers || []).map((x, k) => `<option value="${k}" ${k === t.base ? 'selected' : ''}>${esc(x.floor)} · ${x.units}세대 · ${fmt(x.total / 1000)}</option>`).join('');
     h += `<tr><td><b>${esc(t.abbr)}</b></td><td class="num">${fmt(t.excl, 4)}</td><td class="num">${fmt(t.supply, 4)}</td>
       <td class="num">${fmt(py, 1)}</td><td class="num">${fmt(t.units)}</td>
       <td>${opts ? `<select data-tier="${i}">${opts}</select>` : '<span class="err">층별 금액 없음</span>'}</td>
       <td class="num"><input type="number" data-price="${i}" value="${A}" step="0.1"></td>
       <td class="num"><input type="number" data-balc="${i}" value="${B}" step="0.1"></td>
-      <td class="num">${fmt(A + B, 1)}</td><td class="hint">직접 입력</td><td class="num">${fmt(A + B, 1)}</td>
+      <td class="num">${fmt(A + B, 1)}</td><td class="num">${fmt(C, 1)}</td><td class="num">${fmt(A + B + C, 1)}</td>
       <td class="num">${py ? fmt((A + B) / py) : ''}</td></tr>`;
   }
   h += `<tr><th colspan="4">소계</th><th>${fmt(d.households)}</th><th colspan="7" style="text-align:left">${esc(d.basis_note || '')} &nbsp; ${esc(d.avg_note || '')}</th></tr>`;
@@ -385,7 +395,8 @@ function renderOptions() {
 }
 
 // ---------------------------------------------------------------- 5. 그림
-const SLOT_NAMES = {location: '위치도', birdseye: '조감도', siteplan: '단지배치도', community: '커뮤니티'};
+const SLOT_NAMES = {location: '위치도', birdseye: '조감도', siteplan: '단지배치도', community: '커뮤니티', mh_map: '견본주택 위치도 (O6)'};
+const UNIT_KINDS = {basic: '기본형', ext: '확장형', iso: '아이소'};
 const thumb = id => `/api/img?job=${S.job}&id=${id}&t=1`;
 function slotImgs(ids, emptyText) {
   ids = (ids || []).filter(Boolean);
@@ -398,12 +409,12 @@ function renderImages() {
     `<div class="slot"><div class="t">${n}${k === 'community' ? ' <span class="hint">여러 장 가능</span>' : ''}</div>
      <div class="ims" data-slot="${k}">${slotImgs(im[k])}</div></div>`).join('');
   const u = im.units = im.units || {};
-  $('#units').innerHTML = `<tr><th>타입</th><th>기본형</th><th>확장형</th></tr>` + S.draft.types.map(t =>
-    `<tr><td><b>${esc(t.abbr)}</b></td>${['basic', 'ext'].map(k => `<td><div class="ims" data-unit="${esc(t.abbr)}" data-kind="${k}">${slotImgs([(u[t.abbr] || {})[k]], k === 'basic' ? '기본형 평면이 없으면 엑셀에 X 표' : '')}</div></td>`).join('')}</tr>`).join('');
+  $('#units').innerHTML = `<tr><th>타입</th><th>기본형 (비확장)</th><th>확장형</th><th>아이소 (3D)</th></tr>` + S.draft.types.map(t =>
+    `<tr><td><b>${esc(t.abbr)}</b></td>${Object.keys(UNIT_KINDS).map(k => `<td><div class="ims" data-unit="${esc(t.abbr)}" data-kind="${k}">${slotImgs([(u[t.abbr] || {})[k]], k === 'basic' ? '없으면 엑셀에 X 표 (아이소가 있으면 확장형·아이소)' : k === 'iso' ? '기본형이 없을 때만 엑셀에 들어감' : '')}</div></td>`).join('')}</tr>`).join('');
   document.querySelectorAll('[data-slot]').forEach(el => el.onclick = () => openPicker({slot: el.dataset.slot}));
   document.querySelectorAll('[data-unit]').forEach(el => el.onclick = () => openPicker({unit: el.dataset.unit, kind: el.dataset.kind}));
 }
-function pickerTitle(p) { return p.slot ? SLOT_NAMES[p.slot] + ' 고르기' : `${p.unit} ${p.kind === 'basic' ? '기본형' : '확장형'} 평면도 고르기`; }
+function pickerTitle(p) { return p.slot ? SLOT_NAMES[p.slot] + ' 고르기' : `${p.unit} ${UNIT_KINDS[p.kind]} 평면도 고르기`; }
 function currentIds(p) {
   const im = S.draft.images;
   return p.slot ? (im[p.slot] || []) : [((im.units[p.unit] || {})[p.kind])].filter(Boolean);

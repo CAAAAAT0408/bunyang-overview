@@ -1,7 +1,7 @@
 // 브라우저 안에서 Python(Pyodide)을 띄워 분양개요 엔진을 돌린다 (모듈 워커).
 // 공고·양식·그림 파일은 이 브라우저 밖으로 나가지 않는다.
 import { loadPyodide } from 'https://cdn.jsdelivr.net/npm/@bentopdf/pymupdf-wasm@0.11.16/assets/pyodide.js';
-const VERSION = '2026.10.16a';
+const VERSION = '2026.10.18a';
 // PyMuPDF(공고 PDF 읽기)가 들어 있는 Pyodide 묶음 (Python 3.13)
 const PYODIDE = 'https://cdn.jsdelivr.net/npm/@bentopdf/pymupdf-wasm@0.11.16/assets/';
 const PYMUPDF = PYODIDE + 'pymupdf-1.26.3-cp313-none-pyodide_2025_0_wasm32.whl';

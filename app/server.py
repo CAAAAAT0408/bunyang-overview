@@ -202,10 +202,21 @@ def prefer_nums(draft):
     return nums
 
 
+def prefer_tokens(draft):
+    """단지명 속 번호 ('아크메르 동탄 99' → ['99']) — 한 홈페이지에 단지가 여럿일 때 우리 단지 그림 고르기"""
+    name = draft.get('complex_name') or draft.get('title') or ''
+    return sorted(set(re.findall(r'(?<![\d.])(\d{2,3})(?![\d])', name)))
+
+
+IMAGE_SLOTS = ('location', 'birdseye', 'siteplan', 'community', 'mh_map')
+UNIT_KINDS = ('basic', 'ext', 'iso')
+
+
 def run_collect(job, draft, home):
     from engine.webcollect import Collector
     job.log(f'분양 홈페이지 읽는 중: {home}')
-    c = Collector(home, job.img_dir, draft['types'], log=job.log, prefer=prefer_nums(draft))
+    c = Collector(home, job.img_dir, draft['types'], log=job.log, prefer=prefer_nums(draft),
+                  prefer_tokens=prefer_tokens(draft))
     r = c.run()
     for e in r['errors'][:5]:
         log.info('%s collect: %s', job.id, e)
@@ -213,10 +224,13 @@ def run_collect(job, draft, home):
     job.save_cands(old + r['cands'])
     wjson(os.path.join(job.dir, 'webtext.json'), {'text': r.get('text', ''), 'pages': r['pages']})
     auto = r['auto']
-    imgs = {k: auto.get(k) or [] for k in ('location', 'birdseye', 'siteplan', 'community')}
-    imgs['units'] = {a: {k: v for k, v in u.items() if k in ('basic', 'ext')} for a, u in (auto.get('units') or {}).items()}
+    imgs = {k: auto.get(k) or [] for k in IMAGE_SLOTS}
+    imgs['units'] = {a: {k: v for k, v in u.items() if k in UNIT_KINDS} for a, u in (auto.get('units') or {}).items()}
     job.log(f"그림 후보 {len(r['cands'])}장 (자동 배정: 위치도 {len(imgs['location'])}, 조감도 {len(imgs['birdseye'])}, "
-            f"배치도 {len(imgs['siteplan'])}, 커뮤니티 {len(imgs['community'])}, 평면도 {len(imgs['units'])}타입)")
+            f"배치도 {len(imgs['siteplan'])}, 커뮤니티 {len(imgs['community'])}, 견본주택 위치도 {len(imgs['mh_map'])}, "
+            f"평면도 {len(imgs['units'])}타입)")
+    if not imgs['mh_map']:
+        job.log('견본주택 위치도(O6)를 홈페이지에서 찾지 못했습니다. 화면 5번에서 넣지 않으면 양식 그림을 그대로 둡니다.')
     if not r['cands']:
         job.log('홈페이지에서 그림을 찾지 못했습니다. 화면에서 그림 파일을 직접 넣어 주세요.')
     return imgs, r.get('text', '')
@@ -275,7 +289,7 @@ def analyze_job(job, notice_name, home_override):
         draft['template'] = tinfo
         wjson(os.path.join(job.dir, 'draft.json'), draft)
         # 홈페이지 그림 (주차대수는 화면에서 직접 입력 — 2026-10-15 사용자 지정)
-        imgs = {'location': [], 'birdseye': [], 'siteplan': [], 'community': [], 'units': {}}
+        imgs = {**{k: [] for k in IMAGE_SLOTS}, 'units': {}}
         if draft.get('homepage'):
             try:
                 imgs, _text = run_collect(job, draft, draft['homepage'])
@@ -308,10 +322,10 @@ def build_job(job, draft):
         def files(ids):
             return [cands[i]['file'] for i in ids or [] if i in cands and os.path.exists(cands[i]['file'])]
         im = draft.get('images') or {}
-        images = {k: files(im.get(k)) for k in ('location', 'birdseye', 'siteplan', 'community')}
+        images = {k: files(im.get(k)) for k in IMAGE_SLOTS}
         images['units'] = {}
         for a, u in (im.get('units') or {}).items():
-            images['units'][a] = {k: (files([v]) or [None])[0] for k, v in u.items() if k in ('basic', 'ext')}
+            images['units'][a] = {k: (files([v]) or [None])[0] for k, v in u.items() if k in UNIT_KINDS}
         name = safe_filename(draft.get('output_name') or '분양개요 및 청약결과.xlsx')
         out_dir = os.path.join(job.dir, 'out')
         shutil.rmtree(out_dir, ignore_errors=True)

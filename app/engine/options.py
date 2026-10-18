@@ -579,7 +579,8 @@ def option_columns(groups, order):
         per = {a: [v for v in g['variants'] if v['prices'].get(a)] for a in order}
         if not any(len(vs) > 1 for vs in per.values()):
             cols.append({'id': g['id'], 'group': g['id'], 'header': column_name(g), 'name': g['name'],
-                         'page': g.get('page'), 'values': {a: (vs[0]['prices'][a] if vs else None) for a, vs in per.items()}})
+                         'page': g.get('page'), 'values': {a: (vs[0]['prices'][a] if vs else None) for a, vs in per.items()},
+                         'vids': {a: (vs[0]['id'] if vs else None) for a, vs in per.items()}})
             continue
         def key_of(v):
             return variant_key(v['label']) or re.sub(r'\s+', ' ', v['label'])[:14]
@@ -591,10 +592,11 @@ def option_columns(groups, order):
         if all(re.fullmatch(r'\d+(안|대)|선택\d+', k) for k in keys):
             keys.sort(key=lambda k: (k[-1], int(re.sub(r'\D', '', k))))
         for j, k in enumerate(keys):
-            vals = {}
+            vals, vids = {}, {}
             for a in order:
                 vs = [v for v in per[a] if key_of(v) == k]
                 vals[a] = vs[0]['prices'][a] if vs else None
+                vids[a] = vs[0]['id'] if vs else None
             cols.append({'id': f"{g['id']}k{j + 1}", 'group': g['id'], 'header': f"{column_name(g)} {k}",
-                         'name': f"{g['name']} {k}", 'page': g.get('page'), 'values': vals})
+                         'name': f"{g['name']} {k}", 'page': g.get('page'), 'values': vals, 'vids': vids})
     return cols

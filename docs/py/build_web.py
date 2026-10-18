@@ -18,6 +18,7 @@ from lxml import etree
 
 import xlsxio as X
 from xlsxio import q, NS, RNS, PNS, CNS, XDR, col2num, num2col, cell_key
+from engine.draft import REPORT_WIDTHS, chosen_option_cols, report_cells, report_layout, unit_headers, unit_pair
 
 A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 R_IMG = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image'
@@ -927,8 +928,8 @@ class Builder:
                 out.append((x / EMU_PT, y / EMU_PT, w / EMU_PT, h / EMU_PT))
         return out
 
-    def place_images(self, ws, images, left, top, width, height, margin=6, gap=6):
-        """images = [{'data': bytes, 'w', 'h'}] — 틀(점 단위) 안에 너비를 맞춰 위아래로 쌓는다(비율 유지)"""
+    def place_images(self, ws, images, left, top, width, height, margin=6, gap=6, align='center'):
+        """images = [{'data': bytes, 'w', 'h'}] — 틀(점 단위) 안에 비율 유지. 여러 장이면 가장 크게 보이는 바둑판 배치"""
         images = [im for im in images if im and im.get('data')]
         if not images:
             return 0
@@ -937,17 +938,26 @@ class Builder:
             w, h, _ = img_size(im['data'])
             sizes.append((im.get('w') or w or 1, im.get('h') or h or 1))
         L, T = left + margin, top + margin
-        W, H = width - 2 * margin, height - 2 * margin - gap * (len(images) - 1)
-        hs = [W * h / w for (w, h) in sizes]
-        scale = min(1.0, H / sum(hs)) if sum(hs) else 1.0
-        y = T + max(0, (H - sum(hs) * scale) / 2)
+        W, H = width - 2 * margin, height - 2 * margin
+        n = len(images)
+        best = None
+        for cols in range(1, n + 1):
+            rows = -(-n // cols)
+            cw, ch = (W - gap * (cols - 1)) / cols, (H - gap * (rows - 1)) / rows
+            if cw <= 0 or ch <= 0:
+                continue
+            sc = [min(cw / w, ch / h) for (w, h) in sizes]
+            area = sum(s * s * w * h for s, (w, h) in zip(sc, sizes))
+            if best is None or area > best[0]:
+                best = (area, cols, cw, ch, sc)
+        _, cols, cw, ch, sc = best
         dr = self.drawing(ws, create=True)
         g = self.geo(ws)
-        for im, (w, h), hh in zip(images, sizes, hs):
-            ww, hh = W * scale, hh * scale
-            x = L + (W - ww) / 2
+        for k, (im, (w, h), s) in enumerate(zip(images, sizes, sc)):
+            ww, hh = w * s, h * s
+            cx, cy = L + (k % cols) * (cw + gap), T + (k // cols) * (ch + gap)
+            x, y = (cx, cy) if align == 'topleft' else (cx + (cw - ww) / 2, cy + (ch - hh) / 2)
             dr.add_picture(im['data'], x * EMU_PT, y * EMU_PT, ww * EMU_PT, hh * EMU_PT, g)
-            y += hh + gap
         dr.save()
         return len(images)
 
@@ -973,9 +983,11 @@ class Builder:
         step('일반개요·사업일정', self.fill_top, ws, d)
         r0, sum_row = step('공급개요', self.fill_supply, ws, d)
         step('위치도·조감도·배치도·커뮤니티 그림', self.fill_images, ws, d, images, sum_row)
+        step('견본주택 위치도(O6)', self.fill_mh_map, ws, d, images)
         step('단위세대', self.fill_units, ws, d, images)
         step('인쇄영역·쪽 나누기', self.set_pages, ws)
         step('공고자료 시트', self.data_sheet, d)
+        step('보고자료 시트', self.report_sheet, d)
         step('청약결과 시트', self.fill_result, d, r0)
         if d.get('delete_hidden', True):
             step('이전 현장 숨김 시트 정리', self.delete_sheets, old_hidden)
@@ -1005,19 +1017,26 @@ class Builder:
                   ('오픈일', 'mh_open'), ('모집공고', 'notice_date'), ('청약일정', 'subscription'),
                   ('당첨자', 'winners'), ('계약일정', 'contract'), ('입주예정', 'move_in')]
         gcol = 7
+        at = {}
         for r in range(5, 21):
             lab = ns(self.val(ws, r, 2))
             if not lab:
                 continue
             for key, field in labels:
                 if key in lab:
+                    at[field] = r
                     v = d.get(field)
                     if field in ('mh_open', 'notice_date', 'winners'):
                         ser = excel_date(v)
                         put(ws, r, gcol, ser if ser else '')
                     else:
                         put(ws, r, gcol, v or '')
+                    if field == 'developers' and d.get('developers_label'):
+                        put(ws, r, 2, d['developers_label'])                # 위탁/수탁/시공 · 시행/시공
                     break
+        if not d.get('mh_open') and at.get('mh_open') and at.get('notice_date'):
+            # M/H 오픈일이 공고에 없으면 모집공고일과 같게 (2026-10-18 사용자 파일: =G15)
+            put(ws, at['mh_open'], gcol, '=' + num2col(gcol) + str(at['notice_date']))
         rc = self.find_cell(ws, r'^세대수$', 12, 15, 20, 30)
         if rc:
             put(ws, rc[0], rc[1] + 1, d.get('households') or '')
@@ -1072,20 +1091,20 @@ class Builder:
         types = d['types']
         n = len(types)
         nold = (sum_row - r0) // 2
-        self.pictures_in(ws, 1, sum_row + 12, min_col=cN + 1)
+        self.pictures_in(ws, sec or hdr, sum_row + 12, min_col=cN + 1)   # 위쪽 O6 견본주택 위치도는 fill_mh_map 이 바꾼다
         merges = self.big_merges(ws, r0, sum_row, 1, cN)
         self.log(f'공급개요 {nold}개 타입 → {n}개')
         delta = resize_blocks(ws, r0, nold, n, 2)
         sum_row += delta
         for m in merges:
             merge_range(ws, m['row'], m['col'], m['last'] + delta, m['col'] + m['ncols'] - 1)
-        ocols = d.get('option_cols') or []
-        oc0 = cN + 6
+        # 유상옵션 내역 칸: Q 열부터 '비고 포함' 품목의 고른 안만, 유상옵션(C) = 그 합계 (2026-10-18 사용자 파일 기준)
+        ocols = chosen_option_cols(d)
+        oc0 = cN + 3
         far = max(60, oc0 + len(ocols) + 2)
         clear_range(ws, hdr, cN + 1, sum_row + 1, far)
         if ocols:
             unmerge_range(ws, hdr, oc0, sum_row + 1, far)
-            put(ws, hdr, oc0, '유상옵션 (공고 원문, 단위: 천원) — 합계는 유상옵션(C) 칸에 직접 입력')
             for j, c in enumerate(ocols):
                 put(ws, hdr + 1, oc0 + j, c.get('header') or c.get('name') or '')
         for i, t in enumerate(types):
@@ -1093,7 +1112,8 @@ class Builder:
             r1 = r + 1
             row_a = {cC: t['excl'], cE: t['supply'], cG: f'={L(cE)}{r}*0.3025', cH: t['units'],
                      cI: round((t.get('price') or 0) / 1000, 1), cJ: round((t.get('balcony') or 0) / 1000, 1),
-                     cK: f'=+{L(cI)}{r}+{L(cJ)}{r}', cL: '', cM: f'=+{L(cL)}{r}+{L(cK)}{r}'}
+                     cK: f'=+{L(cI)}{r}+{L(cJ)}{r}',
+                     cL: f'=SUM({L(oc0)}{r}:{L(oc0 + len(ocols) - 1)}{r})' if ocols else '', cM: f'=+{L(cL)}{r}+{L(cK)}{r}'}
             if cC + 1 < cE:
                 row_a[cC + 1] = t.get('suffix') or ''
             row_b = {cI: f'=+{L(cI)}{r}/{L(cG)}{r}', cJ: f'=+{L(cJ)}{r}/{L(cG)}{r}', cK: f'=+{L(cI)}{r1}+{L(cJ)}{r1}',
@@ -1215,6 +1235,9 @@ class Builder:
         unit_imgs = images.get('units') or {}
         kb = merge_area(ws, h + 1, 4)
         ke_col = kb[1] + (kb[3] - kb[1] + 1)
+        heads = unit_headers(unit_imgs, [t['abbr'] for t in types])      # 기본형|확장형 또는 확장형|아이소
+        put(ws, h + 1, 4, heads[0])
+        put(ws, h + 1, ke_col, heads[1])
         for i, t in enumerate(types):
             b = first + i * size
             lab = t['abbr']
@@ -1224,16 +1247,69 @@ class Builder:
                 put(ws, b + 3, 1, f"={num2col(self.cols['C'])}{sr + 2 * i}*0.3025")
             else:
                 put(ws, b + 3, 1, round(t['excl'] * 0.3025, 2))
-            ui = unit_imgs.get(t['abbr']) or {}
-            for kind, col in (('basic', 4), ('ext', ke_col)):
-                f = ui.get(kind)
+            left, right, _ = unit_pair(unit_imgs.get(t['abbr']) or {})
+            for f, col, is_left in ((left, 4, True), (right, ke_col, False)):
                 area = merge_area(ws, b, col)
-                if kind == 'basic':
-                    self.cross(ws, area, not f)
+                if is_left:
+                    self.cross(ws, area, not f)          # 왼쪽 칸 그림이 없으면 X 표 (기본형 없음)
                 if not f:
                     continue
                 self.place_images(ws, [f], *self.area_box(ws, *area), margin=4)
         self.units_first, self.units_size, self.units_n = first, size, len(types)
+
+    # -------------------------------------------------------------- O6 견본주택 위치도
+    def fill_mh_map(self, ws, d, images):
+        """견본주택 위치도 → O6, 인쇄영역 밖 (2026-10-18 사용자 지정). 양식에 있던 약도 크기에 맞춘다"""
+        files = images.get('mh_map') or []
+        cN = self.cols['N']
+        dr = self.drawing(ws)
+        g = self.geo(ws)
+        old = []
+        if dr is not None:
+            for an in dr.anchors():
+                if an.otype in ('pic', 'grp'):
+                    r, c = an.top_left(g)
+                    if r <= 14 and cN + 1 <= c <= cN + 10:
+                        old.append(an)
+        if not files:
+            self.log('견본주택 위치도: 넣을 그림이 없어 ' + ('양식 그림을 그대로 둡니다' if old else 'O6 를 비워 둡니다'))
+            return
+        w, h = 300.0, 240.0
+        if old:
+            _, _, bw, bh = max((an.box(g) for an in old), key=lambda b: b[2] * b[3])
+            w, h = max(bw / EMU_PT, 200.0), max(bh / EMU_PT, 150.0)
+            for an in old:
+                dr.remove(an)
+            dr.save()
+        self.place_images(ws, files[:1], g.x_of(cN + 1) / EMU_PT, g.y_of(6) / EMU_PT, w, h, margin=0, align='topleft')
+
+    # -------------------------------------------------------------- 보고자료 시트
+    def report_sheet(self, d):
+        """보고자료 시트 (2026-10-18 사용자 지정 양식): 1. 업무일지(오픈동향) / 2. 오픈보고 / 3. 주변시세"""
+        old = next((s['name'] for s in self.book.sheet_list() if ns(s['name']) == '보고자료'), None)
+        if old:
+            self.book.delete_sheet(old)
+        cells = report_cells(d)
+        nr = max(r for r, _, _, _ in cells)
+        rows = [[''] * 11 for _ in range(nr)]
+        st = self.styles
+        styles = {}
+        for r, c, v, n in cells:
+            rows[r - 1][c - 1] = v
+            if n:
+                styles[(r, c)] = st.derive(0, numfmt=n, border='thin')
+        lay = report_layout(d)
+        for r in lay['titles']:
+            styles[(r, 2)] = st.derive(0, bold=True)
+        hr, last = lay['table']
+        head = st.derive(0, bold=True, fill='EFEFEF', border='thin', align={'horizontal': 'center'})
+        cell = st.derive(0, border='thin')
+        for c in range(2, 12):
+            styles[(hr, c)] = head
+            for r in range(hr + 1, last + 1):
+                styles.setdefault((r, c), cell)
+        widths = {(X.col2num(k), X.col2num(k)): w for k, w in REPORT_WIDTHS.items()}
+        add_sheet(self.book, '보고자료', rows, hidden=False, widths=widths, styles=styles)
 
     def cross(self, ws, area, on):
         """기본형 평면이 없으면 칸에 X 표 (양식 관례)"""
@@ -1315,7 +1391,7 @@ class Builder:
         for t in d['types']:
             rows.append([t['abbr'], t.get('balcony') or 0])
         rows.append([])
-        rows.append(['5. 유상옵션 (원) — 분양개요 T열부터 같은 내용(천원), 유상옵션(C) 합계는 직접 입력'])
+        rows.append(['5. 유상옵션 (원) — 비고 포함 품목은 분양개요 Q열부터 같은 내용(천원), 유상옵션(C) = 그 합계'])
         groups = {g['id']: g for g in (d.get('options') or [])}
         rows.append(['품목', '비고 포함'] + [t['abbr'] for t in d['types']] + ['공고 쪽'])
         o0 = len(rows) + 1

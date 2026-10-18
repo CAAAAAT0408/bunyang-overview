@@ -110,7 +110,7 @@ def analyze(notice, nname, template, tname):
             log('⚠ ' + w)
         draft['homepage'] = ''
         draft['template'] = tinfo
-        draft['images'] = {'location': [], 'birdseye': [], 'siteplan': [], 'community': [], 'units': {}}
+        draft['images'] = {'location': [], 'birdseye': [], 'siteplan': [], 'community': [], 'mh_map': [], 'units': {}}
         draft = finalize(draft)
         _S.update(notice=ndata, nname=nname, template=tdata, tname=tname, doc=np_.pdf.doc, pdfimgs={})
         log('분석 끝 — 아래에서 값과 그림을 확인한 뒤 "엑셀 만들기"를 누르세요.')
@@ -209,10 +209,11 @@ def build(draft_json):
             raise UserError('먼저 공고와 양식을 분석해 주세요.')
         d = finalize(json.loads(draft_json))
         im = d.get('images') or {}
-        images = {k: [x for x in (_img(i) for i in im.get(k) or []) if x] for k in ('location', 'birdseye', 'siteplan', 'community')}
+        images = {k: [x for x in (_img(i) for i in im.get(k) or []) if x]
+                  for k in ('location', 'birdseye', 'siteplan', 'community', 'mh_map')}
         images['units'] = {}
         for a, u in (im.get('units') or {}).items():
-            images['units'][a] = {k: _img(v) for k, v in u.items() if k in ('basic', 'ext') and _img(v)}
+            images['units'][a] = {k: _img(v) for k, v in u.items() if k in ('basic', 'ext', 'iso') and _img(v)}
         log('엑셀 작성 중')
         data, sec = build_web.build_workbook(_S['template'], d, images, log=log)
         _S['result'] = data

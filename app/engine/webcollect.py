@@ -6,6 +6,12 @@
 - 평면도는 '기본형'·'확장형(확장 기본형)' 표기가 있는 것만 그 칸에 넣는다 (설명·탭 글자, 없으면 그림 속 글자를 OCR).
   표기가 없는 평면도 한 장은 확장형 칸에만 넣고 기본형 칸은 X 표로 둔다 (2026-10-15 사용자 지정).
 - 사진+표가 붙은 사업개요 그림은 흰 여백 기준으로 사진만 잘라 후보를 늘린다.
+- 2026-10-18 사용자 지정 (imgcut 으로 그림 속 덩어리를 나눔):
+  · 평면 그림에서 2D 평면·3D 아이소를 나누고 키맵(작은 단지배치도)·면적표는 잘라 낸다.
+    기본형·확장형이 있으면 그 둘, 기본형이 없고 아이소가 있으면 확장형·아이소, 둘 다 없으면 기본형 칸 X.
+  · 단지배치도는 위에서 본 배치도만, 커뮤니티는 도면만 자른다. 동호수배치도는 배치도로 쓰지 않는다.
+  · 견본주택 위치도(오시는 길 약도)를 찾아 양식 O6 에 넣는다.
+  · 한 홈페이지에 단지가 여럿(95·99)이면 우리 단지 번호가 주소에 있는 그림을 먼저 쓴다.
 """
 import hashlib
 import html as htmlmod
@@ -21,13 +27,19 @@ import time
 import urllib.parse
 import urllib.request
 
+from . import imgcut
+
 UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/130.0.0.0 Safari/537.36')
 SKIP_IMG = re.compile(r'logo|icon|ico_|btn|button|arrow|sns|favicon|kakao|naver|blog|insta|youtube|facebook|'
                       r'loading|spinner|blank|spacer|qr|bi\.|/bi_|_bi|top_|quick|gnb|lnb|footer|header|'
                       r'keymap|key_map|키맵|_m\.|_mo\.|_m_\d|_mobile|/mobile/|/mo/', re.I)
 STRONG = {'location': r'위치도|입지\s*환경|광역\s*위치|입지도', 'birdseye': r'조감도|투시도',
-          'siteplan': r'단지\s*배치도', 'community': r'커뮤니티', 'units': r'평면도'}
+          'siteplan': r'단지\s*배치도', 'community': r'커뮤니티', 'units': r'평면도',
+          'mh_map': r'견본\s*주택|모델\s*하우스|주택\s*전시관|오시는\s*길'}
+DONGHO = re.compile(r'동\s*[·.]?\s*호수|동호수|동호\s*배치|dongho|(?<![a-z])dh\d*[._]', re.I)
+MH_WORDS = re.compile(r'견본\s*주택|모델\s*하우스|주택\s*전시관|홍보관', re.I)
+DECOR = re.compile(r'bg|leaf|deco|visual|banner|photo|thumb|_img_?\d', re.I)
 PLAN_SKIP = re.compile(r'keymap|key_map|키맵|마감|texture|finish|interior|인테리어|동\s*호|dongho|조망|view_', re.I)
 SKIP_LINK = re.compile(r'\.(pdf|zip|hwp|hwpx|docx?|xlsx?|pptx?|mp4|avi|jpg|jpeg|png|gif)(\?|$)|^(mailto|tel|javascript|#)', re.I)
 SLOTS = {
@@ -36,7 +48,10 @@ SLOTS = {
     'siteplan': (r'단지\s*배치|배치도|단지배치|site\s*plan|siteplan|layout|배치|danzi|danji', 3),
     'community': (r'커뮤니티|community|club|클럽|주민공동|부대시설|amenity', 3),
     'units': (r'평면|평형|타입|type|unit|floor|세대안내|유니트|세대\s*정보|plan', 3),
+    'mh_map': (r'오시는\s*길|찾아\s*오시는|견본\s*주택|모델\s*하우스|주택\s*전시관|홍보관|contact|directions|way_?to|'
+               r'model_?house|(?<![a-z])mh(?![a-z])', 3),
 }
+IMAGE_SLOTS = ('location', 'birdseye', 'siteplan', 'community', 'mh_map')
 
 
 def _host(u):
@@ -157,7 +172,7 @@ def parse_page(url, h):
 
 
 class Collector:
-    def __init__(self, home, out_dir, types=None, log=None, max_pages=45, prefer=()):
+    def __init__(self, home, out_dir, types=None, log=None, max_pages=45, prefer=(), prefer_tokens=()):
         home = (home or '').strip()
         self.home = iri(home if re.match(r'^https?://', home) else ('https://' + home if home else ''))
         self.out = out_dir
@@ -170,6 +185,8 @@ class Collector:
         self.seen_img = {}
         self.errors = []
         self.prefer = set(prefer)          # 우리 단지 번호 ('1') — '1단지'·'1BL' 그림 우선
+        # 단지명 속 번호 ('아크메르 동탄 99' → '99') — 주소에 '/99/'·'complex99' 가 있는 그림 우선
+        self.prefer_rx = [re.compile(rf'(?<!\d){re.escape(t)}(?!\d)') for t in prefer_tokens]
 
     # -------------------------------------------------------------- 둘러보기
     def crawl_static(self):
@@ -448,18 +465,43 @@ class Collector:
         return path
 
     # -------------------------------------------------------------- 분류
+    def preferred(self, c):
+        """주소(폴더·파일 이름)나 쪽 주소에 우리 단지 번호가 있는 그림"""
+        where = urllib.parse.unquote(urllib.parse.urlparse(c.get('src') or '').path) + ' ' + \
+            urllib.parse.urlparse(c.get('page') or '').path + ' ' + (c.get('menu') or '') + ' ' + (c.get('alt') or '')
+        return any(rx.search(where) for rx in self.prefer_rx)
+
+    def page_text(self, url):
+        return next((p.get('text') or '' for p in self.pages if p.get('url') == url), '')
+
     def score(self, c, slot):
         pat, w = SLOTS[slot]
         s = 0
         for field, fw in (('menu', 4), ('alt', 3), ('title', 1), ('src', 2), ('page', 2)):
             if re.search(pat, c.get(field) or '', re.I):
                 s += fw
-        if s == 0:
+        base = os.path.basename(urllib.parse.urlparse(c.get('src') or '').path)
+        if slot == 'mh_map':
+            if s == 0 and re.search(r'(?<![a-z])map', base, re.I) and not re.search(r'location|입지|위치', base, re.I) \
+                    and MH_WORDS.search(self.page_text(c.get('page'))):
+                s = 3                               # 첫 화면의 'map.jpg' + 쪽 글에 '주택전시관' (LH)
+            if s and re.search(r'map|약도|지도', base + ' ' + (c.get('alt') or ''), re.I):
+                s += 2
+            if s and DECOR.search(base):
+                s -= 4                              # 배경·장식 그림 (contact_bg, contact_leaf)
+            if s and re.search(r'location|입지', base, re.I):
+                s -= 4
+        if s <= 0:
             return 0
+        if slot == 'siteplan' and (DONGHO.search(f"{c.get('alt') or ''} {base}") or
+                                   (DONGHO.search(c.get('menu') or '') and '단지' not in (c.get('menu') or ''))):
+            s = max(1, s - 6)                       # 동·호수 배치도는 다른 배치도가 없을 때만 (2026-10-18 사용자 지정)
+        if STRONG.get(slot) and re.search(STRONG[slot], c.get('menu') or ''):
+            s += 1
+        if self.preferred(c):
+            s += 3
         if slot == 'birdseye' and c.get('menu') == '첫 화면' and c['w'] >= 1200:
             s += 1
-        if slot == 'siteplan' and re.search(r'동\s*[·.]?\s*호수|동호수', c.get('alt') or ''):
-            s -= 3                                  # 동·호수 배치도 (같은 쪽의 '단지배치도' 그림이 우선)
         if re.search(STRONG[slot], c.get('alt') or ''):
             s += 2                                  # 그림 설명에 '단지배치도'·'조감도' 같은 이름이 그대로 있으면
         label = (c.get('alt') or '') + ' ' + (c.get('menu') or '')
@@ -476,14 +518,31 @@ class Collector:
             parts = urllib.parse.urlparse(c.get('src') or '').path.split('/')
             return (c.get('alt') or '') + ' ' + ' '.join(urllib.parse.unquote(x) for x in parts[-2:])
         pool = [c for c in self.cands if c.get('kind') == 'web' and not PLAN_SKIP.search(where(c) + ' ' + (c.get('menu') or ''))]
-        hits = [c for c in pool if re.search(pat, where(c), re.I)]
+        hits = [c for c in pool if re.search(pat, where(c) + ' ' + (c.get('ocr_text') or ''), re.I)]
         if not hits:
             hits = [c for c in pool if re.search(pat, c.get('menu') or '', re.I) and self.score(c, 'units') > 0]
-        return sorted(hits, key=lambda c: -c['w'] * c['h'])
+        return sorted(hits, key=lambda c: (not self.preferred(c), -c['w'] * c['h']))
+
+    def ocr_type_names(self, limit=16):
+        """타입 이름이 그림 이름·설명에 없는 평면 쪽 그림(unit01.jpg …)은 그림 속 글자('74㎡')에서 타입 이름을 찾는다"""
+        if not self.types or all(self.unit_hits(t['abbr']) for t in self.types):
+            return
+        base = lambda c: os.path.basename(urllib.parse.urlparse(c.get('src') or '').path)
+        desktop = {base(c) for c in self.cands if c.get('kind') == 'web' and '/m/' not in (c.get('src') or '')}
+        pats = [type_pattern(t['abbr']) for t in self.types]
+        pool = [c for c in self.cands if c.get('kind') == 'web' and 'ocr_text' not in c and self.score(c, 'units') >= 4
+                and not ('/m/' in (c.get('src') or '') and base(c) in desktop)            # 모바일용 중복 그림
+                and not any(re.search(p, f"{c.get('alt', '')} {base(c)}", re.I) for p in pats)]
+        pool = sorted(pool, key=lambda c: -c['w'] * c['h'])[:limit]
+        if not pool:
+            return
+        res = ocr_lines([c['file'] for c in pool], self.log)
+        for c in pool:
+            c['ocr_text'] = ' '.join(ln[2] for ln in res.get(c['file']) or [])
 
     def classify(self):
         auto = {}
-        for slot in ('location', 'birdseye', 'siteplan', 'community'):
+        for slot in IMAGE_SLOTS:
             ranked = sorted(self.cands, key=lambda c: (self.score(c, slot), c['w'] * c['h']), reverse=True)
             ranked = [c for c in ranked if self.score(c, slot) > 0]
             auto[slot] = [ranked[0]['id']] if ranked else []
@@ -499,44 +558,94 @@ class Collector:
         return len(empty) >= 2 or (self.types and units < (len(self.types) + 1) // 2)
 
     def assign_plans(self, auto):
-        """타입별 평면도 → {'basic': id, 'ext': id}. '기본형'·'확장형(기본)' 표기가 있는 것만, 표기 없는 한 장은 확장형 칸"""
+        """타입별 평면 → {'basic': id, 'ext': id, 'iso': id} (2026-10-18 사용자 지정)
+        그림 속 덩어리를 나눠 2D 평면·3D 아이소만 자르고 키맵(작은 단지배치도)·면적표·표기 단추는 뺀다.
+        2D 평면의 기본형(비확장)/확장형은 설명·탭·파일 이름, 없으면 그림 속 글자(OCR) 표기로 가리고,
+        표기 없는 평면은 확장형으로 본다. 어느 칸에 넣을지는 엑셀 작성 때 unit_pair() 가 정한다."""
+        from PIL import Image
         byid = {c['id']: c for c in self.cands}
+        per = {abbr: [byid[i] for i in u.get('hits', []) if i in byid][:4] for abbr, u in (auto.get('units') or {}).items()}
+        parts = {}
+        for c in {c['id']: c for hs in per.values() for c in hs}.values():
+            try:
+                with Image.open(c['file']) as im:
+                    parts[c['id']] = imgcut.plan_parts(im.convert('RGB'))
+            except Exception as e:
+                self.errors.append(f"평면 나누기 실패 {c['id']}: {e}")
+        def dominance(c):
+            p = parts.get(c['id']) or {}
+            return max([b['area'] for b in (p.get('plans') or []) + (p.get('isos') or [])] or [0])
+        for abbr in per:                                # 도면이 그림의 큰 부분인 것부터 (옵션 위치도·표 그림은 뒤로)
+            per[abbr].sort(key=lambda c: (not self.preferred(c), -dominance(c)))
+        def label_of(c):
+            return text_label(f"{c.get('alt', '')} {c.get('menu', '')} {os.path.basename(c.get('src', ''))}")
+        need = sorted({c['file'] for hs in per.values() for c in hs
+                       if label_of(c) is None and (parts.get(c['id']) or {}).get('plans')})
+        ocr = ocr_lines(need, self.log) if need else {}
+        names = {'basic': '기본형', 'ext': '확장형', 'iso': '아이소'}
         out = {}
-        need_ocr = []
-        per = {}
-        for abbr, u in (auto.get('units') or {}).items():
-            hits = [byid[i] for i in u.get('hits', []) if i in byid][:4]
-            per[abbr] = hits
-            for c in hits:
-                if text_label(f"{c.get('alt', '')} {c.get('menu', '')} {os.path.basename(c.get('src', ''))}") is None:
-                    need_ocr.append(c['file'])
-        ocr = ocr_lines(sorted(set(need_ocr)), self.log) if need_ocr else {}
+        nsheet = 0
         for abbr, hits in per.items():
             got = {}
-            unlabeled = []
+            unl = None
             for c in hits:
-                lab = text_label(f"{c.get('alt', '')} {c.get('menu', '')} {os.path.basename(c.get('src', ''))}")
-                if lab in ('basic', 'ext'):
-                    got.setdefault(lab, c)
+                p = parts.get(c['id'])
+                if not p:
                     continue
+                if p['sheet']:
+                    nsheet += 1                         # 유상옵션 안내처럼 작은 도면이 여럿인 그림
+                    continue
+                lab = label_of(c)
                 if lab == 'option':
                     continue
-                pos = ocr_label_pos(ocr.get(c['file']))
-                if not pos:
-                    unlabeled.append(c)
-                    continue
-                # 그림 속 표제('기본 확장형' 등) 바로 아래 도면 덩어리만 자른다 (면적표·품목 안내 제외)
-                for k, y in pos:
-                    if k in got:
-                        continue
-                    got[k] = crop_below(c, y, self.out, self.cands, '기본형' if k == 'basic' else '확장형') or c
-            out[abbr] = {k: v['id'] for k, v in got.items()}
-            if not got and unlabeled:
-                # 표기 없는 평면: 가장 큰 한 장을 확장형 칸에만 (기본형 칸은 X)
-                c = unlabeled[0]
-                segs = split_plan(c, self.out, self.cands)
-                out[abbr] = {'ext': (segs[0]['id'] if len(segs) == 1 else c['id']), 'unlabeled': True}
+                plans = p['plans']
+                if plans:
+                    if lab in ('basic', 'ext'):
+                        got.setdefault(lab, (c, plans[0]['box']))
+                    else:
+                        done = set()
+                        for k, i in label_plans(plans, ocr.get(c['file'])):
+                            if k not in got:
+                                got[k] = (c, plans[i]['box'])
+                            done.add(i)
+                        rest = [b for i, b in enumerate(plans) if i not in done]
+                        if rest and unl is None:
+                            unl = (c, rest[0]['box'])
+                if p['isos'] and 'iso' not in got:
+                    got['iso'] = (c, p['isos'][0]['box'])
+            if 'ext' not in got and unl:
+                got['ext'] = unl                        # 표기 없는 평면 한 장은 확장형 (기본형 칸은 X)
+            res = {}
+            for k, (c, box) in got.items():
+                cc = crop_save(c, imgcut.pad(box, (c['w'], c['h']), 10), self.out, self.cands, 'plan', names[k])
+                res[k] = cc['id']
+            if res:
+                out[abbr] = res
+        if nsheet:
+            self.log(f'평면 후보 중 옵션 안내 그림 {nsheet}장은 뺐습니다')
         return out
+
+    def crop_slots(self, auto):
+        """배치도는 위에서 본 배치도만, 커뮤니티는 도면만, 견본주택 위치도는 지도만 자른다 (2026-10-18 사용자 지정).
+        잘라도 원래 그림은 후보에 남겨 화면에서 바꿀 수 있다"""
+        from PIL import Image
+        byid = {c['id']: c for c in self.cands}
+        for slot, fn, label in (('siteplan', imgcut.siteplan_box, '배치도'), ('community', imgcut.community_boxes, '도면'),
+                                ('mh_map', imgcut.main_box, '약도')):
+            if not auto.get(slot) or auto[slot][0] not in byid:
+                continue
+            src = byid[auto[slot][0]]
+            try:
+                with Image.open(src['file']) as im:
+                    found = fn(im.convert('RGB'))
+            except Exception as e:
+                self.errors.append(f'{slot} 자르기 실패: {e}')
+                continue
+            boxes = found if isinstance(found, list) else ([found] if found else [])
+            if boxes:
+                auto[slot] = [crop_save(src, imgcut.pad(b, (src['w'], src['h']), 8), self.out, self.cands, 'crop', label)['id']
+                              for b in boxes]
+        return auto
 
     def all_text(self):
         return '\n'.join(p.get('text', '') for p in self.pages)
@@ -561,26 +670,31 @@ class Collector:
             except Exception as e:
                 self.errors.append(f'Edge 읽기 실패: {e}')
                 self.log(f'Edge 읽기 실패: {e}')
+        try:
+            self.ocr_type_names()
+        except Exception as e:
+            self.errors.append(f'평면 타입 글자 읽기 실패: {e}')
         auto = self.classify()
-        # 평면도: 기본형 / 확장형(확장 기본형)만
+        # 평면도: 2D 기본형·확장형 + 3D 아이소 (키맵 빼고)
         try:
             auto['units'] = self.assign_plans(auto)
         except Exception as e:
             self.errors.append(f'평면도 나누기 실패: {e}')
             self.log(f'평면도 나누기 실패: {e}')
             auto['units'] = {}
-        nb = sum(1 for u in auto['units'].values() if u.get('basic'))
-        ne = sum(1 for u in auto['units'].values() if u.get('ext'))
-        nu = sum(1 for u in auto['units'].values() if u.get('unlabeled'))
         if auto['units']:
-            self.log(f'평면도: 기본형 {nb}타입, 확장형 {ne}타입' + (f' (표기 없는 평면 {nu}타입은 확장형 칸에만)' if nu else ''))
+            n = {k: sum(1 for u in auto['units'].values() if u.get(k)) for k in ('basic', 'ext', 'iso')}
+            self.log(f"평면도: 기본형 {n['basic']}타입, 확장형 {n['ext']}타입, 아이소 {n['iso']}타입")
         # 조감도가 사업개요처럼 사진+표인 그림이면 사진 부분만
-        for slot in ('birdseye',):                      # 배치도는 동 목록·범례까지 통째로 (사람이 만든 분양개요들이 그렇게 함)
-            if auto.get(slot):
-                src = next(c for c in self.cands if c['id'] == auto[slot][0])
-                photo = split_photo(src, self.out, self.cands)
-                if photo:
-                    auto[slot] = [photo['id']]
+        if auto.get('birdseye'):
+            src = next(c for c in self.cands if c['id'] == auto['birdseye'][0])
+            photo = split_photo(src, self.out, self.cands)
+            if photo:
+                auto['birdseye'] = [photo['id']]
+        try:
+            auto = self.crop_slots(auto)
+        except Exception as e:
+            self.errors.append(f'그림 자르기 실패: {e}')
         return {'cands': self.cands, 'auto': auto,
                 'pages': [{'url': p['url'], 'menu': p.get('menu', ''), 'title': p.get('title', '')} for p in self.pages],
                 'errors': self.errors[:20], 'text': self.all_text()[:200000]}
@@ -611,6 +725,39 @@ def ocr_label_pos(lines):
             k = labs.pop()
             if all(k != o[0] for o in out):
                 out.append((k, ln[1]))
+    return out
+
+
+def label_plans(plans, lines):
+    """OCR 표기 줄 → 2D 평면 덩어리 짝 [(kind, 평면 번호)]. 표기 수와 평면 수가 같으면 읽는 순서대로 짝짓고,
+    아니면 표기 바로 아래(제목) 또는 바로 위(단추)의 가장 가까운 평면"""
+    labs = []
+    for ln in lines or []:
+        if isinstance(ln, (list, tuple)) and len(ln) >= 3:
+            k = ocr_labels([ln])
+            if len(k) == 1:
+                labs.append((k.pop(), ln[0], ln[1]))
+    if not labs:
+        return []
+    out, used = [], set()
+    for k, x, y in sorted(labs, key=lambda t: (t[2], t[1])):
+        best = None
+        for i, b in enumerate(plans):
+            x0, y0, x1, y1 = b['box']
+            pw, ph = x1 - x0, y1 - y0
+            if not (x0 - 0.25 * pw <= x <= x1 - 0.05 * pw):
+                continue                                # 평면 폭 안의 표기만 (옆 표의 '기본형' 열 머리글 등 제외)
+            if y <= y0:
+                d = y0 - y if y0 - y <= 0.6 * ph else None          # 위의 제목
+            elif y >= y1:
+                d = (y - y1) * 1.2 if y - y1 <= 0.4 * ph else None  # 아래의 단추
+            else:
+                d = (y - y0) if y - y0 <= 0.15 * ph else None       # 도면 안 위쪽 표기
+            if d is not None and (best is None or d < best[0]):
+                best = (d, i)
+        if best and best[1] not in used and all(k != o[0] for o in out):
+            out.append((k, best[1]))
+            used.add(best[1])
     return out
 
 
