@@ -58,6 +58,7 @@ class Builder:
         self.log = log or (lambda *a: None)
         self.xl = None
         self.wb = None
+        self.dc = 0                                     # 분양개요 시트가 오른쪽으로 밀린 열 수 (find_offset)
 
     # -------------------------------------------------------------- Excel 열고 닫기
     def open(self):
@@ -129,6 +130,12 @@ class Builder:
                 if v is not None and rx.search(ns(v)):
                     return r1 + i, c1 + j
         return None
+
+    def find_offset(self, ws):
+        """양식 맨 앞에 열이 더 끼어 있으면(폭 0 으로 숨긴 빈 A열 등) 그만큼 오른쪽으로 밀어 쓴다.
+        보통 양식은 '1. 일반개요'·'3. 공급개요' 제목이 A열 (2026-10-23 M1-2-2BL 양식은 B열)"""
+        rc = self.find_cell(ws, r'^[13]\.(일반개요|공급개요)', 1, 1, 60, 6)
+        return rc[1] - 1 if rc else 0
 
     # -------------------------------------------------------------- 그림
     def pictures_in(self, ws, r1, r2, max_col=None, min_col=None):
@@ -237,6 +244,9 @@ class Builder:
     def build(self, d, images):
         ws = self.sheet('분양개요') or self.wb.Worksheets(1)
         self.ws = ws
+        self.dc = self.find_offset(ws)
+        if self.dc:
+            self.log(f'양식 맨 앞에 열이 {self.dc}개 더 있어(표가 {col_letter(1 + self.dc)}열부터 시작) 그만큼 밀어서 씁니다')
         t0 = time.time()
         def step(name, fn, *a):
             t = time.time()
@@ -273,22 +283,23 @@ class Builder:
 
     # -------------------------------------------------------------- 1·2. 일반개요 · 사업일정
     def fill_top(self, ws, d):
-        ws.Range('A1').Value = d['title']
-        r = self.find_row(ws, r'^\(?작성일', 1, 1, 6)
+        dc = self.dc
+        ws.Cells(1, 1 + dc).Value = d['title']
+        r = self.find_row(ws, r'^\(?작성일', 1 + dc, 1, 6)
         if r:
-            ws.Cells(r, 1).Value = f"(작성일 : {d['written']})"
+            ws.Cells(r, 1 + dc).Value = f"(작성일 : {d['written']})"
         # 홈페이지 주소 (인쇄영역 밖)
-        rc = self.find_cell(ws, r'^https?://|^www\.', 1, 15, 8, 30)
+        rc = self.find_cell(ws, r'^https?://|^www\.', 1, 15 + dc, 8, 30 + dc)
         if rc:
             ws.Cells(*rc).Value = d.get('homepage') or ''
         elif d.get('homepage'):
-            ws.Range('P5').Value = d['homepage']
+            ws.Cells(5, 16 + dc).Value = d['homepage']             # P5
         labels = [('공급위치', 'location'), ('단지규모', 'scale'), ('단지특징', 'features'),
                   ('주차대수', 'parking_text'), ('위탁', 'developers'), ('시행', 'developers'), ('견본주택', 'model_house'),
                   ('오픈일', 'mh_open'), ('모집공고', 'notice_date'), ('청약일정', 'subscription'),
                   ('당첨자', 'winners'), ('계약일정', 'contract'), ('입주예정', 'move_in')]
-        g = self.grid(ws, 5, 2, 20, 2)
-        gcol = 7
+        g = self.grid(ws, 5, 2 + dc, 20, 2 + dc)
+        gcol = 7 + dc
         at = {}
         for i, row in enumerate(g):
             lab = ns(row[0])
@@ -305,13 +316,13 @@ class Builder:
                     else:
                         cell.Value = v or ''
                     if field == 'developers' and d.get('developers_label'):
-                        ws.Cells(5 + i, 2).Value = d['developers_label']     # 위탁/수탁/시공 · 시행/시공
+                        ws.Cells(5 + i, 2 + dc).Value = d['developers_label']     # 위탁/수탁/시공 · 시행/시공
                     break
         if not d.get('mh_open') and at.get('mh_open') and at.get('notice_date'):
             # M/H 오픈일이 공고에 없으면 모집공고일과 같게 (2026-10-18 사용자 파일: =G15)
             ws.Cells(at['mh_open'], gcol).Formula = '=' + col_letter(gcol) + str(at['notice_date'])
         # 세대당 주차 보조칸
-        rc = self.find_cell(ws, r'^세대수$', 12, 15, 20, 30)
+        rc = self.find_cell(ws, r'^세대수$', 12, 15 + dc, 20, 30 + dc)
         if rc:
             ws.Cells(rc[0], rc[1] + 1).Value = d.get('households') or ''
             ws.Cells(rc[0] + 1, rc[1] + 1).Value = d.get('parking') or ''
@@ -320,23 +331,26 @@ class Builder:
 
     # -------------------------------------------------------------- 3. 공급개요
     def fill_supply(self, ws, d):
-        sec = self.find_row(ws, r'^3\.공급개요', 1, 15, 60)
-        hdr = self.find_row(ws, r'^구분$', 1, (sec or 18) + 1, (sec or 18) + 5)
+        dc = self.dc
+        c1 = 1 + dc                                   # 구분 칸 (보통 A열)
+        sec = self.find_row(ws, r'^3\.공급개요', c1, 15, 60)
+        hdr = self.find_row(ws, r'^구분$', c1, (sec or 18) + 1, (sec or 18) + 5)
         if not hdr:
-            raise BuildError('양식에서 "3. 공급개요" 표의 "구  분" 머리글을 찾지 못했습니다.')
+            raise BuildError(f'양식에서 "3. 공급개요" 표의 "구  분" 머리글을 찾지 못했습니다 '
+                             f'(공급개요 제목 바로 아래 {col_letter(c1)}열에 있어야 합니다).')
         r0 = hdr + 2
-        sum_row = self.find_row(ws, r'^소계$', 3, r0, r0 + 120)
+        sum_row = self.find_row(ws, r'^소계$', 3 + dc, r0, r0 + 120)
         if not sum_row:
             raise BuildError('양식의 공급개요 표에서 "소 계" 줄을 찾지 못했습니다.')
-        # 머리글로 칸 찾기
-        hg = self.grid(ws, hdr, 1, hdr + 1, 14)
+        # 머리글로 칸 찾기 (못 찾으면 보통 양식의 열 + dc)
+        hg = self.grid(ws, hdr, c1, hdr + 1, 14 + dc)
         def hcol(pat, default):
             rx = re.compile(pat)
             for rr in hg:
                 for j, v in enumerate(rr):
                     if v is not None and rx.search(ns(v)):
-                        return j + 1
-            return default
+                        return c1 + j
+            return default + dc
         cC = hcol(r'전용면적', 3)
         cE = hcol(r'공급면적', 5)
         cG = hcol(r'^\(평\)$', 7)
@@ -354,7 +368,7 @@ class Builder:
         # 인쇄영역 밖 보조칸·그림 정리 (이전 현장 옵션표 캡처 등). 위쪽 O6 견본주택 위치도는 fill_mh_map 이 바꾼다
         for sh in self.pictures_in(ws, sec or hdr, sum_row + 12, min_col=cN + 1):
             sh.Delete()
-        merges = self.big_merges(ws, r0, sum_row, 1, cN)
+        merges = self.big_merges(ws, r0, sum_row, c1, cN)
         self.log(f'공급개요 {nold}개 타입 → {n}개')
         delta = self.resize_blocks(ws, r0, nold, n, 2)
         sum_row += delta
@@ -416,19 +430,19 @@ class Builder:
             rng = ws.Range(ws.Cells(r0, oc0), ws.Cells(r0 + len(ob) - 1, oc0 + len(ocols) - 1))
             rng.Value = ob
             self.option_block_format(ws, hdr, oc0, r0, r0 + len(ob) - 1, len(ocols))
-        ws.Cells(r0, 1).Value = d.get('label') or ''
+        ws.Cells(r0, c1).Value = d.get('label') or ''
         ws.Cells(r0, cN).Value = d.get('remarks') or ''
         ws.Cells(sum_row, cH).Formula = f'=SUM({L(cH)}{r0}:{L(cH)}{sum_row - 1})'
         ws.Cells(sum_row, cI).Value = d.get('basis_note') or ''
         # ※ 3줄
         for rr in range(sum_row + 1, sum_row + 6):
-            v = ns(ws.Cells(rr, 1).Value)
+            v = ns(ws.Cells(rr, c1).Value)
             if '평균평당가' in v:
-                self.rich(ws.Cells(rr, 1), d['avg_note'], r'\d')
+                self.rich(ws.Cells(rr, c1), d['avg_note'], r'\d')
             elif '납부조건' in v:
-                self.rich(ws.Cells(rr, 1), d['payment_note'], r'중도금')
+                self.rich(ws.Cells(rr, c1), d['payment_note'], r'중도금')
             elif (v.startswith('※유상옵션') or '유상옵션:' in v) and d.get('option_note'):
-                ws.Cells(rr, 1).Value = d['option_note']
+                ws.Cells(rr, c1).Value = d['option_note']
         self.cols = dict(C=cC, E=cE, G=cG, H=cH, I=cI, J=cJ, K=cK, L=cL, M=cM, N=cN)
         self.r0, self.sum_row = r0, sum_row
         return r0, sum_row
@@ -470,18 +484,21 @@ class Builder:
         except Exception as e:
             self.log(f'글자색 지정 실패: {e}')
 
+    NEW_SHEETS = ('공고자료', '보고자료')               # build 가 새로 만드는 시트
+
     # -------------------------------------------------------------- 4~7. 그림 구역
     SECTIONS = [('location', r'^4\.위치도'), ('birdseye', r'^5\.조감도'), ('siteplan', r'^6\.단지배치도'),
                 ('community', r'^7\.커뮤니티')]
 
     def section_rows(self, ws):
         rows = {}
+        c1 = 1 + self.dc
         for key, pat in self.SECTIONS:
-            r = self.find_row(ws, pat.replace(r'^\d\.', r'^\d\.'), 1, 1, 600)
+            r = self.find_row(ws, pat.replace(r'^\d\.', r'^\d\.'), c1, 1, 600)
             if r is None:
-                r = self.find_row(ws, pat.replace(r'^4\.', '').replace(r'^5\.', '').replace(r'^6\.', '').replace(r'^7\.', ''), 1, 1, 600)
+                r = self.find_row(ws, pat.replace(r'^4\.', '').replace(r'^5\.', '').replace(r'^6\.', '').replace(r'^7\.', ''), c1, 1, 600)
             rows[key] = r
-        rows['units'] = self.find_row(ws, r'^\d\.단위세대', 1, 1, 800)
+        rows['units'] = self.find_row(ws, r'^\d\.단위세대', c1, 1, 800)
         return rows
 
     def fill_images(self, ws, d, images, sum_row):
@@ -506,7 +523,7 @@ class Builder:
                 left, top, w, h = f.Left, f.Top, f.Width, f.Height
             else:
                 top = ws.Cells(r1 + 1, 1).Top
-                left = ws.Cells(r1 + 1, 2).Left
+                left = ws.Cells(r1 + 1, 2 + self.dc).Left
                 w = ws.Cells(r1 + 1, cN + 1).Left - left
                 h = ws.Cells(r2 + 1, 1).Top - top
             self.place_images(ws, files, left, top, w, h)
@@ -519,12 +536,13 @@ class Builder:
             self.log('단위세대 구역을 찾지 못했습니다')
             return
         first = h + 2
-        ma = ws.Cells(first, 4).MergeArea
+        c1, cD = 1 + self.dc, 4 + self.dc               # 타입 칸(A) · 기본형 그림 칸(D)
+        ma = ws.Cells(first, cD).MergeArea
         size = ma.Rows.Count if ma.Rows.Count > 1 else 6
         nold = 0
         r = first
         while nold < 60:
-            m = ws.Cells(r, 4).MergeArea
+            m = ws.Cells(r, cD).MergeArea
             if m.Rows.Count != size or m.Row != r:
                 break
             nold += 1
@@ -539,23 +557,23 @@ class Builder:
         self.resize_blocks(ws, first, nold, len(types), size)
         unit_imgs = images.get('units') or {}
         # 기본형/확장형 칸 열 (머리글 줄 h+1 의 병합)
-        kb = ws.Cells(h + 1, 4).MergeArea
+        kb = ws.Cells(h + 1, cD).MergeArea
         ke_col = kb.Column + kb.Columns.Count
         # 머리글: 기본형 | 확장형, 모든 타입이 확장형·아이소 배치면 확장형 | 아이소 (2026-10-18 사용자 지정)
         heads = unit_headers(unit_imgs, [t['abbr'] for t in types])
-        ws.Cells(h + 1, 4).Value = heads[0]
+        ws.Cells(h + 1, cD).Value = heads[0]
         ws.Cells(h + 1, ke_col).Value = heads[1]
         for i, t in enumerate(types):
             b = first + i * size
             lab = t['abbr']
-            ws.Cells(b + 2, 1).Value = int(lab) if re.fullmatch(r'\d+', lab) else lab
+            ws.Cells(b + 2, c1).Value = int(lab) if re.fullmatch(r'\d+', lab) else lab
             sr = getattr(self, 'r0', None)
             if sr:
-                ws.Cells(b + 3, 1).Formula = f"={col_letter(self.cols['C'])}{sr + 2 * i}*0.3025"
+                ws.Cells(b + 3, c1).Formula = f"={col_letter(self.cols['C'])}{sr + 2 * i}*0.3025"
             else:
-                ws.Cells(b + 3, 1).Value = round(t['excl'] * 0.3025, 2)
+                ws.Cells(b + 3, c1).Value = round(t['excl'] * 0.3025, 2)
             left, right, _ = unit_pair(unit_imgs.get(t['abbr']) or {})
-            for f, col, is_left in ((left, 4, True), (right, ke_col, False)):
+            for f, col, is_left in ((left, cD, True), (right, ke_col, False)):
                 area = ws.Cells(b, col).MergeArea
                 if is_left:
                     self.cross(area, not f)                # 왼쪽 칸 그림이 없으면 X 표 (기본형 없음)
@@ -798,7 +816,7 @@ class Builder:
             rows.append([f.get(c, '') for c in cols])         # 입력칸(K·N·P·Q·U·V·W)은 비워 둠
         if rows:
             ws.Range(ws.Cells(first, 3), ws.Cells(first + len(rows) - 1, 25)).Formula = rows
-        ws.Cells(first, 2).Formula = f'={src}!A{r0}'
+        ws.Cells(first, 2).Formula = f'={src}!{col_letter(1 + self.dc)}{r0}'
         S = sum_row
         a, b = first, sum_row - 1
         fs = {'I': f'=SUM(I{a}:I{b})', 'J': f'=SUM(J{a}:J{b})', 'K': f'=SUM(K{a}:K{b})', 'L': f'=IFERROR(K{S}/J{S},0)',
@@ -823,12 +841,14 @@ class Builder:
 
     # -------------------------------------------------------------- 이전 현장 숨김 시트
     def delete_sheets(self, names):
-        names = [n for n in names if n != '공고자료']
+        # 공고자료·보고자료는 이번에 새로 만든 시트 — 양식에서 숨겨져 있던 같은 이름이라도 지우지 않는다
+        # (2026-10-23 M1-2-2BL 양식: 숨긴 보고자료 때문에 새 보고자료가 지워졌음)
+        names = [n for n in names if ns(n) not in self.NEW_SHEETS]
         if not names:
             return
         # 남은 시트의 수식이 지울 시트를 가리키면 값으로 바꾼다
         for s in self.wb.Worksheets:
-            if s.Name in names or s.Name == '공고자료':
+            if s.Name in names or ns(s.Name) in self.NEW_SHEETS:
                 continue
             try:
                 ur = s.UsedRange

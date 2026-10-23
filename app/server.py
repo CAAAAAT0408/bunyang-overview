@@ -106,7 +106,15 @@ def wjson(path, obj):
     tmp = path + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(obj, f, ensure_ascii=False, default=str)
-    os.replace(tmp, path)
+    # 화면이 진행 기록(state.json)을 읽는 순간과 겹치면 Windows 가 바꾸기를 막는다(WinError 5) → 잠깐 뒤 다시
+    for i in range(40):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if i == 39:
+                raise
+            time.sleep(0.05)
 
 
 def _dec(b):
